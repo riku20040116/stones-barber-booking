@@ -34,7 +34,9 @@ export const metadata: Metadata = {
   ),
   title: {
     default: `${STORE.name} Web予約`,
-    template: `%s | ${STORE.name} Web予約`,
+    // 各ページが "Web予約" などを名乗るので、テンプレートには店名だけを足す。
+    // ここに "Web予約" を入れると「Web予約 | STONE'S BARBER Web予約」と重複する。
+    template: `%s | ${STORE.name}`,
   },
   description: `${STORE.name}（福岡市東区若宮）のWeb予約ページ。24時間いつでも空き時間を確認してご予約いただけます。`,
   openGraph: {
