@@ -1,0 +1,13 @@
+# バイナリを改行変換の対象から外す。
+# これが無いと Windows で PDF や画像が CRLF 変換されて壊れることがある。
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
