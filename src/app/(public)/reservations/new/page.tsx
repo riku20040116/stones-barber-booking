@@ -15,11 +15,13 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function NewReservationPage() {
-  // 表は週単位で動的取得するが、月別カレンダー（当月＋翌月）に休業日を
+  // 表は週単位で動的取得するが、月別カレンダー（当月＋3 ヶ月）に休業日を
   // 描画するため、休業日例外も先読みしてクライアントに渡す。
   const today = todayJstStart();
   const fromDateStr = dateStringAfterDays(today, 0);
-  const toDateStr = dateStringAfterDays(today, 70); // 当月＋翌月をカバーする 70 日
+  // 3 ヶ月先まで予約できるうえ、カレンダーはその月の月末まで描画するので、
+  // 余裕を見て 130 日分の休業日を先読みする。
+  const toDateStr = dateStringAfterDays(today, 130);
 
   const [menus, overrides] = await Promise.all([
     fetchActiveMenus(),

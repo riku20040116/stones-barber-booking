@@ -18,6 +18,11 @@ import {
 import { createCheckoutSessionForReservation } from "@/lib/stripe/server";
 import { notifyReservationCreated } from "@/lib/email/notifications";
 import { dateStringAfterDays } from "@/lib/timezone";
+import {
+  BOOKING_HORIZON_MONTHS,
+  MAX_RESERVATIONS_IN_HORIZON,
+  MIN_GAP_DAYS_BETWEEN_RESERVATIONS,
+} from "@/lib/calendar";
 
 /** PostgrestError は標準 Error 派生でないため、message/code/details/hint を引き出す */
 function formatRpcError(err: unknown): string {
@@ -190,6 +195,33 @@ export async function submitReservation(
     if (msg.includes("no_menu_selected")) {
       return { ok: false, error: "メニューを1つ以上選択してください。" };
     }
+    if (msg.includes("too_far_ahead")) {
+      return {
+        ok: false,
+        error:
+          `ご予約は${BOOKING_HORIZON_MONTHS}ヶ月先までとなっております。`
+          + "もう少し手前の日付をお選びください。",
+      };
+    }
+    if (msg.includes("too_many_reservations")) {
+      return {
+        ok: false,
+        error:
+          `ご予約はお一人さま${MAX_RESERVATIONS_IN_HORIZON}件までとなっております。`
+          + "すでに上限に達しているため、これ以上お取りいただけません。"
+          + "ご予約の変更・キャンセルは「予約確認」ページからお願いします。",
+      };
+    }
+    if (msg.includes("too_soon_after_other")) {
+      return {
+        ok: false,
+        error:
+          `すでにご予約がある日の前後${MIN_GAP_DAYS_BETWEEN_RESERVATIONS}日以内は、`
+          + "続けてご予約いただけません。"
+          + "別の週の日付をお選びいただくか、「予約確認」ページから既存のご予約をご確認ください。",
+      };
+    }
+    // 旧ルール（未来の予約は 1 件まで）。マイグレーション未適用の DB 向けに残す。
     if (msg.includes("duplicate_active_reservation")) {
       return {
         ok: false,

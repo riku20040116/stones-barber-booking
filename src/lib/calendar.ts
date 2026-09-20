@@ -25,6 +25,40 @@ import {
 
 export const SLOT_GRANULARITY_MIN = 15;
 
+// =============================================================================
+// 予約ルール（DB 側の create_reservation とセットで維持すること）
+//   supabase/migrations/20260920000002_booking_limits.sql
+// ここを変えたら必ず同じ値にマイグレーションも直す。
+// =============================================================================
+
+/** 今日から何ヶ月先まで予約できるか */
+export const BOOKING_HORIZON_MONTHS = 3;
+/** 上の期間内に 1 人が持てる有効な予約の上限 */
+export const MAX_RESERVATIONS_IN_HORIZON = 3;
+/** 既存予約の前後この日数以内は予約できない（= 1 週間に 2 件入れられない） */
+export const MIN_GAP_DAYS_BETWEEN_RESERVATIONS = 7;
+
+/**
+ * 予約可能な最終日（JST）を返す。
+ *
+ * 暦どおりに月を足す。月末は翌月の同日が無い場合に丸める。
+ * 例: 11/30 → 2/28（うるう年なら 2/29）
+ *
+ * DB 側は `now() + interval '3 months'` で判定しているので、
+ * 画面に出す上限がそれを超えないよう同じ数え方にしている。
+ */
+export function bookingHorizonDateStr(now: Date = new Date()): DateString {
+  const todayStr = formatDateJst(now);
+  const [y, m, d] = todayStr.split("-").map(Number) as [number, number, number];
+  const targetIdx = y * 12 + (m - 1) + BOOKING_HORIZON_MONTHS;
+  const ty = Math.floor(targetIdx / 12);
+  const tm = (targetIdx % 12) + 1;
+  // 対象月の日数に丸める（3/31 の 3 ヶ月後は 6/30）
+  const lastDay = new Date(Date.UTC(ty, tm, 0)).getUTCDate();
+  const td = Math.min(d, lastDay);
+  return `${ty}-${String(tm).padStart(2, "0")}-${String(td).padStart(2, "0")}` as DateString;
+}
+
 // 昼食休憩のルール:
 //   営業時間と LUNCH_ZONE の重なり区間に、必ず LUNCH_BREAK_MIN_MIN 以上
 //   連続で空いているウィンドウが残るよう、新規予約候補をフィルタする。

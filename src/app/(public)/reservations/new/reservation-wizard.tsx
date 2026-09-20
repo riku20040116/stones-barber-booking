@@ -45,7 +45,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-import { type HolidayOverride } from "@/lib/calendar";
+import {
+  BOOKING_HORIZON_MONTHS,
+  MAX_RESERVATIONS_IN_HORIZON,
+  MIN_GAP_DAYS_BETWEEN_RESERVATIONS,
+  bookingHorizonDateStr,
+  type HolidayOverride,
+} from "@/lib/calendar";
 import { MonthlyCalendar } from "@/components/public/monthly-calendar";
 import {
   formatDateJst,
@@ -74,7 +80,8 @@ import {
 // 型・定数
 // =============================================================================
 const WEEK_DAYS = 7;
-const MAX_FUTURE_DAYS = 60;
+/** 月別カレンダーの表示月数。3 ヶ月先まで予約できるので当月＋3 ヶ月。 */
+const CALENDAR_MONTHS = BOOKING_HORIZON_MONTHS + 1;
 
 const DOW_LABELS = ["日", "月", "火", "水", "木", "金", "土"] as const;
 
@@ -960,8 +967,19 @@ function todayStr(): string {
   return formatDateJst(new Date());
 }
 
+/**
+ * 週表示の「開始日」として選べる最後の日。
+ *
+ * 表は fromDateStr から 7 日分を出すので、最終日（予約可能な上限日）が
+ * 表の右端に来る位置まで進めるようにする。
+ */
 function maxFromStr(): string {
-  return shiftDate(todayStr(), MAX_FUTURE_DAYS - WEEK_DAYS + 1);
+  const horizon = bookingHorizonDateStr();
+  const latestStart = shiftDate(horizon, -(WEEK_DAYS - 1));
+  // 予約可能期間が 1 週間より短いことは無いが、念のため今日より前には戻さない
+  return compareTimeStrings(latestStart, todayStr()) < 0
+    ? todayStr()
+    : latestStart;
 }
 
 function shortDateLabel(dateStr: string): string {
@@ -1114,6 +1132,10 @@ function SlotStep({
         weekStart={fromDateStr}
         onSelectDate={handleSelectDate}
         fullDates={fullDates}
+        months={CALENDAR_MONTHS}
+        // MonthlyCalendar は maxFrom を「週の開始日」とみなし、maxFrom+6 日目までを
+        // クリック可能にする。maxFromStr() + 6 日 = 予約可能な最終日になる。
+        maxFrom={maxFromStr()}
       />
 
       <div ref={tableRef} className="scroll-mt-44 space-y-4">
@@ -1442,6 +1464,25 @@ function CustomerStep({
 
   return (
     <div className="grid gap-4">
+      {/* 送信してから弾かれると入力が無駄になるので、先にルールを知らせる */}
+      <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
+        <p className="font-semibold">ご予約のきまり</p>
+        <ul className="mt-1 list-disc space-y-0.5 pl-4">
+          <li>
+            ご予約は{BOOKING_HORIZON_MONTHS}ヶ月先まで、お一人さま
+            {MAX_RESERVATIONS_IN_HORIZON}件までお取りいただけます。
+          </li>
+          <li>
+            すでにご予約がある日の前後
+            {MIN_GAP_DAYS_BETWEEN_RESERVATIONS}日以内は、続けてお取りいただけません。
+          </li>
+        </ul>
+        <p className="mt-1">
+          同じメールアドレスのご予約で判定します。ご家族で別々にご予約される場合は、
+          それぞれのメールアドレスをご入力ください。
+        </p>
+      </div>
+
       <FieldGroup id="name" label="お名前" required error={errors.name}>
         <Input
           id="name"
