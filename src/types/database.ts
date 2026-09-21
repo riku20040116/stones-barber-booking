@@ -25,6 +25,8 @@ export type MenuCategoryDb =
   | "straighten"
   | "option";
 export type ProfileRole = "customer" | "admin";
+export type ReservationSource = "web" | "phone" | "walkin" | "handwritten";
+export type CustomerSource = "web" | "admin" | "handwritten";
 export type HolidayType = "closed" | "special_hours";
 export type EmailType = "confirmation" | "reminder" | "cancellation" | "admin_notice";
 
@@ -123,14 +125,16 @@ export interface Database {
           payment_status: PaymentStatus;
           stripe_payment_intent: string | null;
           notes: string | null;
-          source: "web" | "phone" | "walkin";
+          source: ReservationSource;
+          /** 顧客リスト（customers）への紐づけ。INSERT 時にトリガが自動で埋める。 */
+          customer_record_id: string | null;
           created_at: string;
           updated_at: string;
         };
         Insert: Omit<
           Database["public"]["Tables"]["reservations"]["Row"],
-          "id" | "code" | "created_at" | "updated_at"
-        > & { id?: string; code?: string };
+          "id" | "code" | "created_at" | "updated_at" | "customer_record_id"
+        > & { id?: string; code?: string; customer_record_id?: string | null };
         Update: Partial<Database["public"]["Tables"]["reservations"]["Insert"]>;
         Relationships: [];
       };
@@ -178,8 +182,48 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["settings"]["Insert"]>;
         Relationships: [];
       };
+      customers: {
+        Row: {
+          id: string;
+          name: string;
+          phone: string | null;
+          email: string | null;
+          notes: string | null;
+          source: CustomerSource;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          phone?: string | null;
+          email?: string | null;
+          notes?: string | null;
+          source?: CustomerSource;
+        };
+        Update: Partial<Database["public"]["Tables"]["customers"]["Insert"]>;
+        Relationships: [];
+      };
     };
-    Views: Record<string, never>;
+    Views: {
+      customer_summaries: {
+        Row: {
+          id: string;
+          name: string;
+          phone: string | null;
+          email: string | null;
+          notes: string | null;
+          source: CustomerSource;
+          created_at: string;
+          updated_at: string;
+          visit_count: number;
+          last_visit_at: string | null;
+          next_reservation_at: string | null;
+          upcoming_count: number;
+        };
+        Relationships: [];
+      };
+    };
     Functions: {
       lookup_reservation: {
         Args: { p_code: string; p_email: string };

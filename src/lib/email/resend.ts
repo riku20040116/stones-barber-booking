@@ -113,7 +113,14 @@ export type SendEmailResult =
 export async function sendEmail(params: SendEmailParams): Promise<SendEmailResult> {
   const from = getEmailFromAddress();
   const replyTo = getReplyToAddress();
-  const toList = Array.isArray(params.to) ? params.to : [params.to];
+  // 電話予約・手書き予約はメールアドレスが空のことがある。
+  // 空宛先で SMTP を叩くとエラーになり email_log が失敗で埋まるので、先に落とす。
+  const toList = (Array.isArray(params.to) ? params.to : [params.to])
+    .map((a) => a.trim())
+    .filter((a) => a.length > 0);
+  if (toList.length === 0) {
+    return { ok: false, error: "no_recipient" };
+  }
   const toJoined = toList.join(", ");
 
   let providerId: string | null = null;

@@ -8,6 +8,13 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "**" },
     ],
   },
+  experimental: {
+    serverActions: {
+      // 手書き予約表の写真を Server Action で受け取るため、既定の 1MB から広げる。
+      // 画面側で長辺 2576px の JPEG に縮めてから送るので、2 枚でも 5MB 程度に収まる。
+      bodySizeLimit: "12mb",
+    },
+  },
 };
 
 export default nextConfig;

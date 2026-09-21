@@ -1,0 +1,91 @@
+{
+  "sheet_found": true,
+  "week_year": 2026,
+  "week_month": 8,
+  "week_day": 11,
+  "columns": [
+    {
+      "column": "A",
+      "month": 8,
+      "day": 11,
+      "closed": false,
+      "bookings": [
+        {
+          "box_start": "10:15",
+          "box_end": "11:00",
+          "written_start": "10:15",
+          "name": "山田",
+          "course_text": "C2",
+          "course_codes": ["C2"],
+          "memo_no": null,
+          "confidence": "high",
+          "remarks": ""
+        },
+        {
+          "box_start": "13:00",
+          "box_end": "13:30",
+          "written_start": "13:00",
+          "name": "佐藤",
+          "course_text": "C5",
+          "course_codes": ["C5"],
+          "memo_no": 1,
+          "confidence": "high",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "column": "B",
+      "month": 8,
+      "day": 12,
+      "closed": false,
+      "bookings": [
+        {
+          "box_start": "10:00",
+          "box_end": "10:45",
+          "written_start": "10:15",
+          "name": "鈴木",
+          "course_text": "C2+剃",
+          "course_codes": ["C2", "+剃"],
+          "memo_no": null,
+          "confidence": "medium",
+          "remarks": "開始欄は 10:15 と読めるが、四角の上辺は 10:00 の線"
+        },
+        {
+          "box_start": "10:30",
+          "box_end": "12:00",
+          "written_start": "10:30",
+          "name": "高橋",
+          "course_text": "K1",
+          "course_codes": ["K1"],
+          "memo_no": null,
+          "confidence": "high",
+          "remarks": ""
+        }
+      ]
+    },
+    {
+      "column": "C",
+      "month": 8,
+      "day": 13,
+      "closed": false,
+      "bookings": [
+        {
+          "box_start": "16:00",
+          "box_end": "17:00",
+          "written_start": "16:00",
+          "name": "伊藤",
+          "course_text": "C9+頭",
+          "course_codes": ["+頭"],
+          "memo_no": null,
+          "confidence": "low",
+          "remarks": "メニュー記号の数字が読みにくい"
+        }
+      ]
+    }
+  ],
+  "contacts": [
+    { "no": 1, "name": "佐藤", "phone": "090-1111-2222", "menu_text": "C5", "remarks": "小学生" }
+  ],
+  "warnings": []
+}

@@ -28,13 +28,15 @@ Web予約画面に出る内容を決めるものだけを置いている。
 | `/admin` | ダッシュボード（今日の予約・今週の件数） |
 | `/admin/reservations` | 予約一覧・詳細・日時変更・キャンセル |
 | `/admin/reservations/new` | 手動予約登録（電話予約の記帳） |
+| `/admin/import` | 手書き予約表の写真を AI で読み取って登録（[詳細](docs/handwritten-import.md)） |
+| `/admin/customers` | 顧客リスト（予約から自動作成。不明な連絡先は色つき） |
 | `/admin/reservations/force-cancel` | 期限を過ぎた予約の強制キャンセル |
 | `/admin/calendar` | 予約カレンダー |
 | `/admin/menus` | メニューの追加・編集・公開/非公開 |
 | `/admin/holidays` | 臨時休業・特別営業時間 |
 | `/admin/settings` | 営業時間ルールの確認・データバックアップ |
 
-顧客管理（CRM）や店舗紹介情報の編集はこのアプリには置いていない。
+店舗紹介情報の編集はこのアプリには置いていない。
 
 ---
 

@@ -11,6 +11,7 @@
     "create-admin": "node scripts/create-admin.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.127.0",
     "@base-ui/react": "^1.4.1",
     "@hookform/resolvers": "^5.2.2",
     "@stripe/stripe-js": "^9.4.0",

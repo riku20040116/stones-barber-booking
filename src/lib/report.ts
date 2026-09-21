@@ -51,8 +51,9 @@ export async function runMonthlyReport(
   );
   const totalRevenue = active.reduce((s, r) => s + (r.total_price ?? 0), 0);
   const webCount = active.filter((r) => r.source === "web").length;
+  // 手書き予約表から取り込んだ予約も、電話や来店で受けたものなので同じ枠で数える
   const phoneCount = active.filter(
-    (r) => r.source === "phone" || r.source === "walkin",
+    (r) => r.source === "phone" || r.source === "walkin" || r.source === "handwritten",
   ).length;
   const cancelRate =
     rows.length > 0

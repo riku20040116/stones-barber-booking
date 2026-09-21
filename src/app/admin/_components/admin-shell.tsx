@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   CalendarDaysIcon,
   CalendarIcon,
+  CameraIcon,
   ExternalLinkIcon,
   GaugeIcon,
   ListChecksIcon,
@@ -12,6 +13,7 @@ import {
   MenuIcon,
   Settings2Icon,
   SquareMenuIcon,
+  UsersIcon,
   XCircleIcon,
 } from "lucide-react";
 
@@ -35,13 +37,15 @@ type NavItem = {
 };
 
 /**
- * ナビは「Web予約画面に関係するもの」だけに絞っている。
- *   予約管理 / カレンダー / 休業日 / メニュー = 予約画面に出る内容を決める4つ。
- * 顧客管理・店舗情報など予約画面に出ないものはこのアプリには置かない。
+ * ナビは予約に関係するものだけに絞っている。
+ *   予約管理 / 手書き予約の取り込み / 顧客リスト / カレンダー / 休業日 / メニュー
+ * 店舗紹介情報など予約に関係しないものはこのアプリには置かない。
  */
 const NAV_ITEMS: NavItem[] = [
   { href: "/admin", label: "ダッシュボード", icon: GaugeIcon, exact: true },
   { href: "/admin/reservations", label: "予約管理", icon: ListChecksIcon },
+  { href: "/admin/import", label: "手書き予約の取り込み", icon: CameraIcon },
+  { href: "/admin/customers", label: "顧客リスト", icon: UsersIcon },
   { href: "/admin/calendar", label: "カレンダー", icon: CalendarIcon },
   {
     href: "/admin/reservations/force-cancel",

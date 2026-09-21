@@ -1,0 +1,35 @@
+{
+  "$comment": "手書き予約表のメニュー記号。予約表PDF（scripts/make_booking_sheet.py）と写真の取り込み（src/lib/sheet/）の両方がこのファイルを読む。記号を変えたら予約表PDFも作り直すこと。slug は menus テーブルの slug。",
+  "main": [
+    { "code": "C1", "slug": "cut-adult-shave", "label": "カット・シャンプー・顔剃り" },
+    { "code": "C2", "slug": "cut-adult", "label": "カット・シャンプー" },
+    { "code": "C3", "slug": "cut-high-school", "label": "カット（高校生）" },
+    { "code": "C4", "slug": "cut-junior-high", "label": "カット（中学生）" },
+    { "code": "C5", "slug": "cut-child", "label": "カット（小学生以下）" },
+    { "code": "S1", "slug": "course-headspa", "label": "ヘッドスパコース" },
+    { "code": "S2", "slug": "course-facespa", "label": "フェイススパコース" },
+    { "code": "S3", "slug": "course-king", "label": "キングコース" },
+    { "code": "K1", "slug": "color-standard", "label": "カラー" },
+    { "code": "K2", "slug": "color-bleach", "label": "ブリーチ" },
+    { "code": "K3", "slug": "color-mesh", "label": "メッシュ" },
+    { "code": "K4", "slug": "color-gray-blend", "label": "白髪ぼかし" },
+    { "code": "P1", "slug": "perm-standard", "label": "パーマ" },
+    { "code": "P2", "slug": "perm-spiral", "label": "スパイラル" },
+    { "code": "P3", "slug": "perm-twist-spiral", "label": "ツイストスパイラル" },
+    { "code": "P4", "slug": "perm-wet", "label": "濡れパン" },
+    { "code": "P5", "slug": "perm-twist", "label": "ツイスト" },
+    { "code": "T1", "slug": "straighten-standard", "label": "縮毛矯正" }
+  ],
+  "options": [
+    { "code": "+剃", "slug": "opt-face-shave", "label": "お顔剃り" },
+    { "code": "+頭", "slug": "opt-scalp-spa", "label": "頭皮スパ" },
+    { "code": "+顔", "slug": "opt-face-spa", "label": "フェイススパ" },
+    { "code": "+パ", "slug": "opt-face-pack", "label": "フェイスパック" },
+    { "code": "+角", "slug": "opt-exfoliation", "label": "角質落とし" },
+    { "code": "+耳", "slug": "opt-ear-wash", "label": "耳洗い" },
+    { "code": "+鼻", "slug": "opt-nose-wax", "label": "鼻脱毛" },
+    { "code": "+眉", "slug": "opt-eyebrow-shave", "label": "眉毛剃" },
+    { "code": "+線", "slug": "opt-design-line", "label": "デザインライン" },
+    { "code": "+フ", "slug": "opt-skin-fade", "label": "スキンフェード" }
+  ]
+}
