@@ -3,6 +3,8 @@
   "week_year": 2026,
   "week_month": 8,
   "week_day": 11,
+  "import_month": null,
+  "import_day": null,
   "columns": [
     {
       "column": "A",
@@ -16,7 +18,9 @@
           "written_start": "10:15",
           "name": "山田",
           "course_text": "C2",
-          "course_codes": ["C2"],
+          "course_codes": [
+            "C2"
+          ],
           "memo_no": null,
           "confidence": "high",
           "remarks": ""
@@ -27,7 +31,9 @@
           "written_start": "13:00",
           "name": "佐藤",
           "course_text": "C5",
-          "course_codes": ["C5"],
+          "course_codes": [
+            "C5"
+          ],
           "memo_no": 1,
           "confidence": "high",
           "remarks": ""
@@ -46,7 +52,10 @@
           "written_start": "10:15",
           "name": "鈴木",
           "course_text": "C2+S",
-          "course_codes": ["C2", "+S"],
+          "course_codes": [
+            "C2",
+            "+S"
+          ],
           "memo_no": null,
           "confidence": "medium",
           "remarks": "開始欄は 10:15 と読めるが、四角の上辺は 10:00 の線"
@@ -57,7 +66,9 @@
           "written_start": "10:30",
           "name": "高橋",
           "course_text": "K1",
-          "course_codes": ["K1"],
+          "course_codes": [
+            "K1"
+          ],
           "memo_no": null,
           "confidence": "high",
           "remarks": ""
@@ -67,7 +78,7 @@
     {
       "column": "C",
       "month": 8,
-      "day": 13,
+      "day": 14,
       "closed": false,
       "bookings": [
         {
@@ -85,7 +96,13 @@
     }
   ],
   "contacts": [
-    { "no": 1, "name": "佐藤", "phone": "090-1111-2222", "menu_text": "C5", "remarks": "小学生" }
+    {
+      "no": 1,
+      "name": "佐藤",
+      "phone": "090-1111-2222",
+      "menu_text": "C5",
+      "remarks": "小学生"
+    }
   ],
   "warnings": []
 }

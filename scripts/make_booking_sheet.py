@@ -1,21 +1,27 @@
-"""STONE'S BARBER 手書き予約表（写真で取り込む前提）を PDF で作る。
+"""STONE'S BARBER 手書き予約表（写真で取り込む前提）を A4 の PDF で作る。
 
-書き方（用紙の 2 ページ目にも印刷している）:
-  1. 時刻の区切りの横線は、すべて破線で印刷してある。
-  2. 予約が入ったら、その時間帯の「上の破線」と「下の破線」をペンでなぞって実線にし、
-     四角で囲む。四角の上辺 = 開始、下辺 = 終了。
-  3. 四角の最初の行に「開始」「名前」「コース」を書く。欄は固定。
+構成（A4 縦・3 ページ）:
+  1 ページ目  予約表 1/2  火・水・木（A・B・C 列）
+  2 ページ目  予約表 2/2  金・土・日（D・E・F 列）
+  3 ページ目  メニュー早見表（料金・所要時間）・書き方・記入例・お客様メモ
+
+A4 1 枚に 6 日分を入れると 15 分の行が 3.9mm しか取れず書き込めないため、
+1 枚 3 日分にしている（行 約 5.9mm ＝ ノートの B 罫くらい、名前欄 約 23mm）。
+月曜は定休なので、曜日は火〜日をあらかじめ印刷してある。
+
+書き方:
+  - 時刻の区切りの横線はすべて破線。予約が入ったら上下の破線をなぞって四角にする。
+    四角の上辺 = 開始、下辺 = 終了。
+  - 四角の最初の行に「開始」「名前」「コース」を書く。欄は固定。
+  - ✖ を書いた予約は無効（取り消し）。
+  - 写真を撮って取り込んだら「取り込み日」を書く（二重の取り込みを防ぐ）。
 
 AI（写真からの読み取り）に向けた工夫:
-  - 横線は 1 本残らず破線。なぞった線だけが実線になるので、予約の範囲を取り違えない。
-    （毎正時の線まで破線にしているのはこのため。実線を 1 本でも印刷すると、
-     なぞった線と区別がつかなくなる）
-  - 1 日の中を「開始・名前・コース」の 3 欄に固定。どこに何が書いてあるかが決まる。
-  - 四隅に黒い基準マーク（左上だけ白い切り欠き）→ 写真の傾き補正と向きの判定。
-  - 列は A〜F、時刻は左右の両端に印刷。毎正時は太字＋1 時間ごとの薄い帯。
-  - メニューは記号（C2 など）で書けるよう凡例を同じ紙に印刷。
-    記号の一覧は src/lib/sheet/menu-codes.json（取り込み側と共有）。
-  - 料金は Supabase から読む（.env.local）。読めなければ料金なしで印刷する。
+  - 日付の列の中の横線は 1 本残らず破線。なぞった線だけが実線になる。
+  - 四隅に黒い基準マーク（左上だけ白い切り欠き）→ 傾き補正と向きの判定。
+  - 列記号 A〜F と曜日を印刷、時刻は左右の両端に印刷。
+  - メニュー記号は src/lib/sheet/menu-codes.json（取り込み側と共有）。
+  - 料金・所要時間は Supabase から読む（.env.local）。読めなければ空欄で印刷する。
 
 使い方:
     python scripts/make_booking_sheet.py [出力先.pdf]
@@ -30,7 +36,7 @@ import urllib.request
 from pathlib import Path
 
 from reportlab.lib.colors import Color, black, white
-from reportlab.lib.pagesizes import A3
+from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
@@ -43,20 +49,29 @@ pdfmetrics.registerFont(UnicodeCIDFont("HeiseiMin-W3"))
 JP = "HeiseiKakuGo-W5"
 JP_MIN = "HeiseiMin-W3"
 
-PAGE_W, PAGE_H = A3  # 縦: 297 x 420 mm
+PAGE_W, PAGE_H = A4  # 縦: 210 x 297 mm
 
 # --- 版面 -------------------------------------------------------------------
-MARGIN = 10 * mm
-FIDUCIAL = 7 * mm
-HEADER_H = 70 * mm
-DAY_HEAD_H = 17 * mm       # 日付欄＋「開始・名前・コース」の見出し
-FOOTER_H = 7 * mm
-TIME_COL_W = 13 * mm
+MX = 12 * mm              # 左右の余白（四隅の基準マークと重ならないように）
+MY_TOP = 9 * mm
+MY_BOTTOM = 9 * mm
+FIDUCIAL = 6 * mm
+FID_OFFSET = 3.5 * mm
 
-DAY_COLS = 6
-COL_LABELS = ["A", "B", "C", "D", "E", "F"]
+HEAD_H = 20 * mm          # 見出し（タイトル・週・取り込み日・注意書き）
+DAY_HEAD_H = 11 * mm      # 列の見出し（日付・曜日・休 ＋ 開始/名前/コース）
+FOOT_H = 5 * mm
+TIME_W = 11 * mm
+
 # 1 日分の中の固定欄（幅の比率）
-SUB_COLS = [("開始", 0.27), ("名前", 0.43), ("コース", 0.30)]
+SUB_COLS = [("開始", 0.25), ("名前", 0.42), ("コース", 0.33)]
+
+# 予約表のページ: (ページ表記, 列記号, 曜日)
+SHEET_PAGES = [
+    ("1/2", ["A", "B", "C"], ["火", "水", "木"]),
+    ("2/2", ["D", "E", "F"], ["金", "土", "日"]),
+]
+TOTAL_PAGES = len(SHEET_PAGES) + 1
 
 # --- 時間軸（システムの 15 分枠と同じ）---------------------------------------
 START_MIN = 9 * 60
@@ -65,15 +80,16 @@ STEP = 15
 ROWS = (END_MIN - START_MIN) // STEP  # 42 行
 
 # --- 色 ---------------------------------------------------------------------
-DASH_COLOR = Color(0.55, 0.55, 0.58)      # 破線（なぞる線）
-SUB_LINE = Color(0.80, 0.80, 0.82)        # 開始・名前・コースの区切り（縦）
+DASH_COLOR = Color(0.55, 0.55, 0.58)
+SUB_LINE = Color(0.80, 0.80, 0.82)
 FRAME = black
 HEAD_FILL = Color(0.93, 0.93, 0.94)
-HOUR_BAND = Color(0.965, 0.965, 0.975)    # 1 時間おきの薄い帯
+HOUR_BAND = Color(0.965, 0.965, 0.975)
+WEEKEND_FILL = Color(0.90, 0.90, 0.92)
 GRAY_TEXT = Color(0.40, 0.40, 0.43)
 LIGHT_TEXT = Color(0.60, 0.60, 0.63)
 
-DASH = (1.6, 1.6)  # 破線のパターン（pt）
+DASH = (1.4, 1.4)
 
 
 # =============================================================================
@@ -98,27 +114,27 @@ def load_env() -> dict:
     return env
 
 
-def load_prices() -> dict[str, str]:
-    """slug -> 表示用の料金（"4,800" / "7,500〜"）。取れなければ空。"""
+def load_menu_info() -> dict[str, dict]:
+    """slug -> {"price": "4,800" / "7,500〜", "minutes": 50}。取れなければ空。"""
     env = {**load_env(), **os.environ}
     url = env.get("NEXT_PUBLIC_SUPABASE_URL")
     key = env.get("NEXT_PUBLIC_SUPABASE_ANON_KEY")
     if not url or not key:
         return {}
     req = urllib.request.Request(
-        f"{url}/rest/v1/menus?select=slug,price,price_label&is_active=eq.true",
+        f"{url}/rest/v1/menus?select=slug,price,price_label,duration_min&is_active=eq.true",
         headers={"apikey": key, "Authorization": f"Bearer {key}"},
     )
     try:
         with urllib.request.urlopen(req, timeout=10) as res:
             rows = json.loads(res.read().decode("utf-8"))
-    except Exception as e:  # noqa: BLE001 - 料金が取れなくても用紙は作る
-        print(f"  (料金を取得できませんでした: {e}。料金なしで作成します)")
+    except Exception as e:  # noqa: BLE001 - 取れなくても用紙は作る
+        print(f"  (料金・所要時間を取得できませんでした: {e}。空欄で作成します)")
         return {}
     out = {}
     for r in rows:
-        label = r.get("price_label") or f"{r['price']:,}"
-        out[r["slug"]] = label.replace("円", "")
+        label = (r.get("price_label") or f"{r['price']:,}").replace("円", "")
+        out[r["slug"]] = {"price": label, "minutes": r.get("duration_min")}
     return out
 
 
@@ -132,7 +148,7 @@ def hhmm(total_min: int) -> str:
 def draw_fiducials(c: canvas.Canvas) -> None:
     """四隅の基準マーク。左上だけ白い切り欠きを入れて上下の向きを判別できるようにする。"""
     s = FIDUCIAL
-    m = 5 * mm
+    m = FID_OFFSET
     corners = [
         (m, PAGE_H - m - s),
         (PAGE_W - m - s, PAGE_H - m - s),
@@ -148,286 +164,383 @@ def draw_fiducials(c: canvas.Canvas) -> None:
     c.setFillColor(black)
 
 
+def draw_cross(c: canvas.Canvas, x: float, y: float, size: float, width: float = 1.3) -> None:
+    """✖ を線で描く（✖ の文字は PDF の日本語フォントに無く、文字だと消えてしまうため）。
+    (x, y) は左下。"""
+    c.setStrokeColor(black)
+    c.setLineWidth(width)
+    c.line(x, y, x + size, y + size)
+    c.line(x, y + size, x + size, y)
+
+
+def text_with_cross(c: canvas.Canvas, x: float, y: float, parts: list[str],
+                    font: str = JP, size: float = 7.6) -> None:
+    """文字列の間に ✖ を挟んで描く。parts の要素のあいだに 1 つずつ ✖ が入る。"""
+    c.setFont(font, size)
+    cross = size * 0.30 * mm
+    for i, part in enumerate(parts):
+        c.drawString(x, y, part)
+        x += pdfmetrics.stringWidth(part, font, size)
+        if i < len(parts) - 1:
+            draw_cross(c, x + 0.6 * mm, y - 0.1 * mm, cross, width=1.1)
+            x += cross + 1.4 * mm
+
+
 def dashed_hline(c: canvas.Canvas, x1: float, x2: float, y: float) -> None:
     c.setDash(*DASH)
     c.setStrokeColor(DASH_COLOR)
-    c.setLineWidth(0.5)
+    c.setLineWidth(0.45)
     c.line(x1, y, x2, y)
     c.setDash()
 
 
-# =============================================================================
-# 1 ページ目
-# =============================================================================
-def draw_header(c: canvas.Canvas, codes: dict, prices: dict[str, str]) -> None:
-    top = PAGE_H - MARGIN
-    left = MARGIN + 6 * mm  # 基準マークを避ける
-    right = PAGE_W - MARGIN
-
-    c.setFillColor(black)
-    c.setFont(JP, 19)
-    c.drawString(left, top - 7 * mm, "予約表")
-    c.setFont(JP, 8.5)
-    c.drawString(left + 26 * mm, top - 7 * mm, "STONE'S BARBER")
-
-    # 週の記入欄
-    c.setFont(JP, 9)
-    x = left + 62 * mm
-    y = top - 9 * mm
-    c.drawString(x, y + 1.7 * mm, "この用紙の週：")
-    bx = x + 24 * mm
-    for label, w in (("年", 14 * mm), ("月", 9 * mm), ("日", 9 * mm)):
-        c.setStrokeColor(black)
-        c.setLineWidth(0.8)
-        c.rect(bx, y, w, 6.5 * mm, stroke=1, fill=0)
-        c.setFont(JP, 8)
-        c.drawString(bx + w + 1 * mm, y + 1.8 * mm, label)
-        bx += w + 5 * mm
-    c.setFont(JP, 7)
-    c.setFillColor(GRAY_TEXT)
-    c.drawString(bx + 1 * mm, y + 1.8 * mm, "← A 列の日付")
-    c.setFillColor(black)
-
-    # 書き方の要点（1 行）
-    hy = top - 16 * mm
-    c.setFont(JP, 8.5)
-    c.drawString(
-        left,
-        hy,
-        "■ 予約が入ったら、その時間の 上と下の破線をなぞって四角で囲み、最初の行に「開始・名前・コース」を書く",
-    )
-    c.setFont(JP, 7)
-    c.setFillColor(GRAY_TEXT)
-    c.drawString(left + 4 * mm, hy - 4 * mm, "詳しい書き方と記入例は 2 ページ目。新規のお客様は名前の横に ① ② … を付け、2 ページ目に電話番号を書く")
-    c.setFillColor(black)
-
-    # 凡例（4 列）
-    ly = top - 26 * mm
-    c.setFont(JP, 8.5)
-    c.drawString(left, ly, "■ メニュー記号")
-    items = codes["main"]
-    per_col = 5
-    col_w = (right - left) / 4
-    row_h = 4.2 * mm
-    for i, item in enumerate(items):
-        col, row = divmod(i, per_col)
-        x = left + col * col_w
-        y = ly - 4.6 * mm - row * row_h
-        c.setFont(JP, 8)
-        c.drawString(x, y, item["code"])
-        c.setFont(JP, 7)
-        c.drawString(x + 7 * mm, y, item["label"])
-        price = prices.get(item["slug"])
-        if price:
-            c.setFillColor(GRAY_TEXT)
-            c.drawRightString(x + col_w - 6 * mm, y, price)
-            c.setFillColor(black)
-
-    # オプション（入りきらなければ次の行へ）
-    oy = ly - 4.6 * mm - per_col * row_h - 1.2 * mm
-    c.setFont(JP, 8)
-    c.drawString(left, oy, "オプション")
-    ox = left + 16 * mm
-    c.setFont(JP, 7)
-    for item in codes["options"]:
-        text = f"{item['code']} {item['label']}"
-        price = prices.get(item["slug"])
-        if price:
-            text += f" {price}"
-        w = pdfmetrics.stringWidth(text, JP, 7)
-        if ox + w > right:
-            oy -= 4 * mm
-            ox = left + 16 * mm
-        c.drawString(ox, oy, text)
-        ox += w + 3.8 * mm
-
-    # 書き方のきまりと記載例
-    ry = oy - 5.6 * mm
-    rule = codes.get("rule", {})
-    c.setFont(JP, 8)
-    c.drawString(left, ry, "書き方")
-    c.setFont(JP, 7.5)
-    c.drawString(left + 16 * mm, ry, f"{rule.get('text', '')}")
-    rx = left + 16 * mm
-    ry2 = ry - 4.2 * mm
-    c.setFont(JP, 7.5)
-    for i, ex in enumerate(rule.get("examples", [])):
-        label = f"{ex['write']} = {ex['means']}"
+def boxes(c: canvas.Canvas, x: float, y: float, fields: list[tuple[str, float]],
+          h: float = 5.2 * mm, gap: float = 1.0 * mm, font: float = 7.5) -> float:
+    """[   ]年 [  ]月 [  ]日 のような記入枠を並べる。右端の x を返す。"""
+    c.setStrokeColor(black)
+    c.setLineWidth(0.7)
+    for label, w in fields:
+        c.rect(x, y, w, h, stroke=1, fill=0)
+        c.setFont(JP, font)
         c.setFillColor(black)
-        c.drawString(rx, ry2, ex["write"])
-        wcode = pdfmetrics.stringWidth(ex["write"], JP, 7.5)
-        c.setFillColor(GRAY_TEXT)
-        c.setFont(JP, 7)
-        c.drawString(rx + wcode + 1.5 * mm, ry2, f"… {ex['means']}")
-        c.setFont(JP, 7.5)
-        c.setFillColor(black)
-        rx += wcode + pdfmetrics.stringWidth(f"… {ex['means']}", JP, 7) + 8 * mm
-        if i == 1 and rx > right - 60 * mm:
-            rx = left + 16 * mm
-            ry2 -= 4.2 * mm
+        c.drawString(x + w + 0.6 * mm, y + 1.5 * mm, label)
+        x += w + pdfmetrics.stringWidth(label, JP, font) + gap + 1.2 * mm
+    return x
 
 
-def draw_grid(c: canvas.Canvas) -> None:
-    grid_top = PAGE_H - MARGIN - HEADER_H
-    grid_bottom = MARGIN + FOOTER_H
+def footer(c: canvas.Canvas, page_no: int, note: str) -> None:
+    c.setFont(JP, 6.3)
+    c.setFillColor(GRAY_TEXT)
+    c.drawString(MX, MY_BOTTOM - 1 * mm, note)
+    c.drawRightString(PAGE_W - MX, MY_BOTTOM - 1 * mm, f"{page_no} / {TOTAL_PAGES}")
+    c.setFillColor(black)
+
+
+# =============================================================================
+# 予約表（1・2 ページ目）
+# =============================================================================
+def draw_sheet_header(c: canvas.Canvas, page_label: str, days: list[str]) -> None:
+    top = PAGE_H - MY_TOP
+    left = MX
+    right = PAGE_W - MX
+
+    # 1 行目: タイトル ／ この週の火曜日
+    y1 = top - 5.5 * mm
+    c.setFillColor(black)
+    c.setFont(JP, 15)
+    c.drawString(left, y1, f"予約表 {page_label}")
+    tw = pdfmetrics.stringWidth(f"予約表 {page_label}", JP, 15)
+    c.setFont(JP, 10)
+    c.drawString(left + tw + 3 * mm, y1, "・".join(days))
+    c.setFont(JP, 6.5)
+    c.setFillColor(GRAY_TEXT)
+    c.drawString(left + tw + 3 * mm + pdfmetrics.stringWidth("・".join(days), JP, 10) + 3 * mm, y1, "STONE'S BARBER")
+    c.setFillColor(black)
+
+    bx = right - 82 * mm
+    c.setFont(JP, 8)
+    c.drawString(bx, y1, "この週の火曜日")
+    boxes(c, bx + 22 * mm, y1 - 1.6 * mm, [("年", 13 * mm), ("月", 8 * mm), ("日", 8 * mm)])
+
+    # 2 行目: 取り込み日
+    y2 = top - 12 * mm
+    c.setFont(JP, 8)
+    c.drawString(bx, y2, "取り込み日")
+    ex = boxes(c, bx + 22 * mm, y2 - 1.6 * mm, [("月", 8 * mm), ("日", 8 * mm)])
+    c.setFont(JP, 6.2)
+    c.setFillColor(GRAY_TEXT)
+    c.drawString(ex + 0.5 * mm, y2, "← 取り込んだら記入")
+    c.setFillColor(black)
+
+    # 左側: 書き方の要点（右側の記入欄と重ならない幅で 3 行に分ける）
+    c.setFont(JP, 7)
+    c.drawString(left, top - 11 * mm, "予約が入ったら上下の破線をなぞって四角で囲み、")
+    c.drawString(left, top - 14.5 * mm, "最初の行に 開始・名前・コース を書く")
+    text_with_cross(c, left, top - 18 * mm,
+                    ["", " を書いた予約は無効（取り消し）　記号・所要時間は 3 ページ目"], size=7)
+
+
+def draw_sheet_grid(c: canvas.Canvas, columns: list[str], days: list[str]) -> None:
+    grid_top = PAGE_H - MY_TOP - HEAD_H
+    grid_bottom = MY_BOTTOM + FOOT_H
     body_top = grid_top - DAY_HEAD_H
     row_h = (body_top - grid_bottom) / ROWS
 
-    left = MARGIN
-    right = PAGE_W - MARGIN
-    day_w = (right - left - TIME_COL_W * 2) / DAY_COLS
+    left = MX
+    right = PAGE_W - MX
+    n = len(columns)
+    day_w = (right - left - TIME_W * 2) / n
 
     def col_x(i: int) -> float:
-        return left + TIME_COL_W + i * day_w
+        return left + TIME_W + i * day_w
 
-    # --- 1 時間おきの薄い帯（線ではないので、なぞった線と紛れない）-----------
+    # 1 時間おきの薄い帯（線ではないので、なぞった線と紛れない）
     c.setFillColor(HOUR_BAND)
     for r in range(ROWS):
         t = START_MIN + r * STEP
         if (t // 60) % 2 == 1:
             y = body_top - (r + 1) * row_h
             c.rect(left, y, right - left, row_h, stroke=0, fill=1)
-    c.setFillColor(black)
 
-    # --- 見出し -------------------------------------------------------------
+    # 見出しの背景（土日は少し濃く）
     c.setFillColor(HEAD_FILL)
     c.rect(left, body_top, right - left, DAY_HEAD_H, stroke=0, fill=1)
+    for i, d in enumerate(days):
+        if d in ("土", "日"):
+            c.setFillColor(WEEKEND_FILL)
+            c.rect(col_x(i), body_top + 4.8 * mm, day_w, DAY_HEAD_H - 4.8 * mm, stroke=0, fill=1)
     c.setFillColor(black)
 
-    c.setFont(JP, 7.5)
-    for x in (left, right - TIME_COL_W):
-        c.drawCentredString(x + TIME_COL_W / 2, body_top + DAY_HEAD_H / 2 - 1.2 * mm, "時刻")
+    c.setFont(JP, 7)
+    for x in (left, right - TIME_W):
+        c.drawCentredString(x + TIME_W / 2, body_top + DAY_HEAD_H / 2 - 1 * mm, "時刻")
 
-    for i in range(DAY_COLS):
+    for i, (col, dow) in enumerate(zip(columns, days)):
         x = col_x(i)
-        # 1 段目: 列記号・日付・休
-        y1 = body_top + DAY_HEAD_H - 7.4 * mm
-        c.setFont(JP, 9)
-        c.drawString(x + 1.2 * mm, y1 + 1.6 * mm, COL_LABELS[i])
-        # [  ]月 [  ]日 [ ]曜  …  □休
-        bw, bh = 6.4 * mm, 5.4 * mm
-        bx = x + 4.6 * mm
+        y1 = body_top + DAY_HEAD_H - 5.6 * mm
+        # 列記号
+        c.setFont(JP, 8)
+        c.setFillColor(GRAY_TEXT)
+        c.drawString(x + 1 * mm, y1 + 1.2 * mm, col)
+        c.setFillColor(black)
+        # [  ]月 [  ]日
+        bx = x + 4.8 * mm
         c.setStrokeColor(GRAY_TEXT)
         c.setLineWidth(0.6)
         c.setFont(JP, 6.8)
-        for label, w in (("月", bw), ("日", bw), ("曜", 4.8 * mm)):
-            c.rect(bx, y1, w, bh, stroke=1, fill=0)
-            c.drawString(bx + w + 0.5 * mm, y1 + 1.5 * mm, label)
-            bx += w + 3.3 * mm
+        for label in ("月", "日"):
+            c.rect(bx, y1, 7 * mm, 4.6 * mm, stroke=1, fill=0)
+            c.drawString(bx + 7.5 * mm, y1 + 1.2 * mm, label)
+            bx += 7 * mm + 4.4 * mm
+        # 曜日（印刷済み）
+        c.setFont(JP, 11)
+        c.drawString(bx + 0.8 * mm, y1 + 0.9 * mm, f"（{dow}）")
+        # 休
         cb = x + day_w - 6.6 * mm
-        c.rect(cb, y1 + 0.9 * mm, 3.2 * mm, 3.2 * mm, stroke=1, fill=0)
-        c.drawString(cb + 3.7 * mm, y1 + 1.5 * mm, "休")
+        c.setFont(JP, 6.8)
+        c.rect(cb, y1 + 0.8 * mm, 3.1 * mm, 3.1 * mm, stroke=1, fill=0)
+        c.drawString(cb + 3.6 * mm, y1 + 1.2 * mm, "休")
 
-        # 2 段目: 開始・名前・コース
-        y2 = body_top + 1.6 * mm
+        # 開始・名前・コース
         sx = x
-        c.setFont(JP, 7.5)
+        c.setFont(JP, 7)
         c.setFillColor(GRAY_TEXT)
         for name, ratio in SUB_COLS:
             w = day_w * ratio
-            c.drawCentredString(sx + w / 2, y2, name)
+            c.drawCentredString(sx + w / 2, body_top + 1.3 * mm, name)
             sx += w
         c.setFillColor(black)
 
-    # --- 横線: すべて破線（毎正時も破線）----------------------------------
+    # 横線: 日付の列の中はすべて破線（毎正時も破線）
     for r in range(ROWS + 1):
         y = body_top - r * row_h
-        dashed_hline(c, col_x(0), col_x(DAY_COLS), y)
-        # 時刻列の中だけは、毎正時に短い実線の目盛り（日付の列の外なので紛れない）
+        dashed_hline(c, col_x(0), col_x(n), y)
         t = START_MIN + r * STEP
         c.setStrokeColor(DASH_COLOR)
         c.setLineWidth(0.8 if t % 60 == 0 else 0.3)
-        c.line(left, y, left + TIME_COL_W, y)
-        c.line(right - TIME_COL_W, y, right, y)
+        c.line(left, y, left + TIME_W, y)
+        c.line(right - TIME_W, y, right, y)
 
-    # --- 時刻ラベル ---------------------------------------------------------
+    # 時刻ラベル
     for r in range(ROWS):
         t = START_MIN + r * STEP
         y_mid = body_top - r * row_h - row_h / 2
         if t % 60 == 0:
-            c.setFont(JP, 9.5)
+            c.setFont(JP, 8.5)
             c.setFillColor(black)
         elif t % 30 == 0:
-            c.setFont(JP, 7.8)
+            c.setFont(JP, 7)
             c.setFillColor(GRAY_TEXT)
         else:
-            c.setFont(JP, 6.3)
+            c.setFont(JP, 5.8)
             c.setFillColor(LIGHT_TEXT)
-        c.drawCentredString(left + TIME_COL_W / 2, y_mid - 1.2 * mm, hhmm(t))
-        c.drawCentredString(right - TIME_COL_W / 2, y_mid - 1.2 * mm, hhmm(t))
+        c.drawCentredString(left + TIME_W / 2, y_mid - 1 * mm, hhmm(t))
+        c.drawCentredString(right - TIME_W / 2, y_mid - 1 * mm, hhmm(t))
     c.setFillColor(black)
 
-    # --- 縦線 ---------------------------------------------------------------
-    # 開始・名前・コースの区切り（細い実線。縦線はなぞる対象ではない）
+    # 縦線（開始・名前・コースの区切りは細い実線。縦線はなぞる対象ではない）
     c.setStrokeColor(SUB_LINE)
     c.setLineWidth(0.35)
-    for i in range(DAY_COLS):
+    for i in range(n):
         sx = col_x(i)
         for _, ratio in SUB_COLS[:-1]:
             sx += day_w * ratio
-            c.line(sx, grid_bottom, sx, body_top + 5.2 * mm)
-    # 1 日ごとの区切り
+            c.line(sx, grid_bottom, sx, body_top + 4.8 * mm)
     c.setStrokeColor(FRAME)
     c.setLineWidth(1.0)
-    for i in range(DAY_COLS + 1):
+    for i in range(n + 1):
         c.line(col_x(i), grid_bottom, col_x(i), grid_top)
-    # 外枠・見出しの下
-    c.setLineWidth(1.3)
+    c.setLineWidth(1.2)
     c.rect(left, grid_bottom, right - left, grid_top - grid_bottom, stroke=1, fill=0)
-    c.setLineWidth(1.0)
+    c.setLineWidth(0.9)
     c.line(left, body_top, right, body_top)
-    # 見出しの 1 段目と 2 段目の区切り（日付の列の中）
     c.setStrokeColor(SUB_LINE)
     c.setLineWidth(0.4)
-    c.line(col_x(0), body_top + 5.2 * mm, col_x(DAY_COLS), body_top + 5.2 * mm)
+    c.line(col_x(0), body_top + 4.8 * mm, col_x(n), body_top + 4.8 * mm)
 
-    # --- 下の注記 -----------------------------------------------------------
-    c.setFont(JP, 6.8)
-    c.setFillColor(GRAY_TEXT)
-    c.drawString(
-        left + 6 * mm,
-        grid_bottom - 4.6 * mm,
-        "営業時間 火〜金 9:30-19:30 ／ 土日祝 9:00-19:00　定休日 毎週月曜・第3火曜　"
-        "1 行 = 15 分　横線はすべて破線（なぞった線だけが実線になります）",
+
+def draw_sheet_page(c: canvas.Canvas, page_no: int, page_label: str,
+                    columns: list[str], days: list[str]) -> None:
+    draw_fiducials(c)
+    draw_sheet_header(c, page_label, days)
+    draw_sheet_grid(c, columns, days)
+    footer(
+        c,
+        page_no,
+        "1 行 = 15 分　横線はすべて破線（なぞった線だけが実線）　"
+        "営業 火〜金 9:30-19:30 ／ 土日祝 9:00-19:00　定休 月曜・第3火曜",
     )
-    c.drawRightString(right - 6 * mm, grid_bottom - 4.6 * mm, "1 / 2")
+
+
+# =============================================================================
+# 3 ページ目: 早見表・書き方・記入例・お客様メモ
+# =============================================================================
+def draw_quick_reference(c: canvas.Canvas, codes: dict, info: dict, top: float) -> float:
+    left = MX
+    right = PAGE_W - MX
+    col_w = (right - left) / 3
+    row_h = 4.5 * mm
+
+    main = {m["code"]: m for m in codes["main"]}
+    groups = [
+        ("カット・コース", [main[k] for k in ("C1", "C2", "C3", "C4", "C5", "S1", "S2", "S3")]),
+        ("カラー・パーマ・縮毛矯正",
+         [main[k] for k in ("K1", "K2", "K3", "K4", "P1", "P2", "P3", "P4", "P5", "T1")]),
+        ("オプション（コースの後ろに +記号）", codes["options"]),
+    ]
+
+    c.setFont(JP, 10)
+    c.drawString(left, top, "■ メニュー早見表")
+    c.setFont(JP, 6.3)
+    c.setFillColor(GRAY_TEXT)
+    c.drawRightString(right, top, "料金（円） / 所要時間の目安。初めてのお客様は ＋15分")
     c.setFillColor(black)
 
+    y0 = top - 3 * mm
+    max_rows = max(len(items) for _, items in groups)
+    for gi, (title, items) in enumerate(groups):
+        x = left + gi * col_w
+        # 見出し
+        c.setFillColor(HEAD_FILL)
+        c.rect(x + 0.5 * mm, y0 - 4.6 * mm, col_w - 1 * mm, 4.6 * mm, stroke=0, fill=1)
+        c.setFillColor(black)
+        c.setFont(JP, 6.8)
+        c.drawString(x + 1.5 * mm, y0 - 3.3 * mm, title)
+        for r, item in enumerate(items):
+            y = y0 - 4.6 * mm - (r + 1) * row_h + 1.4 * mm
+            meta = info.get(item["slug"], {})
+            c.setFont(JP, 8)
+            c.drawString(x + 1.5 * mm, y, item["code"])
+            c.setFont(JP, 6.6)
+            c.drawString(x + 10 * mm, y, item["label"])
+            c.setFillColor(GRAY_TEXT)
+            if meta.get("price"):
+                c.drawRightString(x + col_w - 10.5 * mm, y, meta["price"])
+            if meta.get("minutes"):
+                c.drawRightString(x + col_w - 1.5 * mm, y, f"{meta['minutes']}分")
+            c.setFillColor(black)
+            # 行の区切り
+            c.setStrokeColor(SUB_LINE)
+            c.setLineWidth(0.3)
+            c.line(x + 0.5 * mm, y - 1.4 * mm, x + col_w - 0.5 * mm, y - 1.4 * mm)
+    return y0 - 4.6 * mm - max_rows * row_h
 
-# =============================================================================
-# 2 ページ目
-# =============================================================================
-def draw_example(c: canvas.Canvas, x0: float, y_top: float) -> float:
+
+def example_minutes(write: str, codes: dict, info: dict) -> str:
+    """"C2+S" → "35＋15＝50分"（取れなければ空）"""
+    by_code = {m["code"]: m for m in codes["main"]}
+    by_code.update({o["code"]: o for o in codes["options"]})
+    parts = write.split("+")
+    keys = [parts[0]] + ["+" + p for p in parts[1:]]
+    mins = []
+    for k in keys:
+        m = by_code.get(k)
+        v = info.get(m["slug"], {}).get("minutes") if m else None
+        if v is None:
+            return ""
+        mins.append(v)
+    if len(mins) == 1:
+        return f"{mins[0]}分"
+    return "＋".join(str(v) for v in mins) + f"＝{sum(mins)}分"
+
+
+def draw_rules(c: canvas.Canvas, codes: dict, info: dict, top: float) -> float:
+    left = MX
+    c.setFont(JP, 10)
+    c.drawString(left, top, "■ 書き方")
+    y = top - 5 * mm
+    lh = 4.2 * mm
+
+    def line(text: str, indent: float = 3 * mm, color=black, size: float = 7.6) -> None:
+        nonlocal y
+        c.setFont(JP, size)
+        c.setFillColor(color)
+        c.drawString(left + indent, y, text)
+        c.setFillColor(black)
+        y -= lh
+
+    line("1. 日付欄に「月」「日」を書きます（曜日は印刷済み）。お休みの日は「休」に印を入れます。")
+    line("2. 予約が入ったら、その時間帯の上と下の破線をなぞって四角で囲みます（1 行 = 15 分）。")
+    line("   四角の上の線が開始、下の線が終了。長さは早見表の所要時間に合わせます。", color=GRAY_TEXT)
+    line("3. 四角の最初の行に「開始」「名前」「コース」を書きます。名前は姓だけで構いません。")
+    line("4. コースは記号で書きます。コース記号を先に書き、オプションを付けるときだけ「+記号」を続けます。")
+
+    rule = codes.get("rule", {})
+    for ex in rule.get("examples", []):
+        c.setFont(JP, 8.5)
+        c.drawString(left + 9 * mm, y, ex["write"])
+        c.setFont(JP, 7.4)
+        c.setFillColor(GRAY_TEXT)
+        mins = example_minutes(ex["write"], codes, info)
+        text = f"… {ex['means']}" + (f"（{mins}）" if mins else "")
+        c.drawString(left + 27 * mm, y, text)
+        c.setFillColor(black)
+        y -= lh
+
+    text_with_cross(c, left + 3 * mm, y, [
+        "5. ", " を書いた予約は無効（取り消し）です。四角の中に大きく ", " を書きます（記入例の 11:45）。塗りつぶさないでください。",
+    ], size=7.6)
+    y -= lh
+    line("6. 新規のお客様は名前の横に ① ② … を付け、下の「お客様メモ」に電話番号を書きます。")
+    line("7. 1 週間分を写真に撮り（1〜3 ページ目、四隅の黒い四角が写るように真上から）、")
+    line("   管理画面「手書き予約の取り込み」で登録します。登録したら「取り込み日」を書きます。", color=GRAY_TEXT)
+    return y
+
+
+def draw_example(c: canvas.Canvas, top: float) -> float:
     """記入例のミニチュア。本物の表と同じ描き方で、なぞった四角を太線で示す。"""
-    rows = [(10 * 60) + 15 * i for i in range(8)]  # 10:00〜11:45
-    rh = 8 * mm
-    tw = 14 * mm
-    widths = [16 * mm, 26 * mm, 20 * mm]
-    total_w = tw + sum(widths)
+    left = MX
+    c.setFont(JP, 10)
+    c.drawString(left, top, "■ 記入例")
 
-    # 見出し
+    x0 = left + 3 * mm
+    rows = [(10 * 60) + 15 * i for i in range(10)]  # 10:00〜12:15
+    rh = 5.9 * mm
+    tw = 11 * mm
+    widths = [13.7 * mm, 23 * mm, 18 * mm]
+    total_w = tw + sum(widths)
+    y_top = top - 3 * mm
+
     c.setFillColor(HEAD_FILL)
-    c.rect(x0, y_top - 6 * mm, total_w, 6 * mm, stroke=0, fill=1)
+    c.rect(x0, y_top - 4.8 * mm, total_w, 4.8 * mm, stroke=0, fill=1)
     c.setFillColor(GRAY_TEXT)
-    c.setFont(JP, 7.5)
-    c.drawCentredString(x0 + tw / 2, y_top - 4.2 * mm, "時刻")
+    c.setFont(JP, 6.8)
+    c.drawCentredString(x0 + tw / 2, y_top - 3.4 * mm, "時刻")
     sx = x0 + tw
     for (name, _), w in zip(SUB_COLS, widths):
-        c.drawCentredString(sx + w / 2, y_top - 4.2 * mm, name)
+        c.drawCentredString(sx + w / 2, y_top - 3.4 * mm, name)
         sx += w
     c.setFillColor(black)
 
-    body_top = y_top - 6 * mm
+    body_top = y_top - 4.8 * mm
     for i in range(len(rows) + 1):
-        y = body_top - i * rh
-        dashed_hline(c, x0 + tw, x0 + total_w, y)
+        dashed_hline(c, x0 + tw, x0 + total_w, body_top - i * rh)
     for i, t in enumerate(rows):
-        c.setFont(JP, 8 if t % 60 == 0 else 6.5)
+        c.setFont(JP, 7.5 if t % 60 == 0 else 5.8)
         c.setFillColor(black if t % 60 == 0 else GRAY_TEXT)
-        c.drawCentredString(x0 + tw / 2, body_top - i * rh - rh / 2 - 1.2 * mm, hhmm(t))
+        c.drawCentredString(x0 + tw / 2, body_top - i * rh - rh / 2 - 1 * mm, hhmm(t))
     c.setFillColor(black)
 
-    # 縦線
     c.setStrokeColor(SUB_LINE)
     c.setLineWidth(0.35)
     sx = x0 + tw
@@ -436,114 +549,85 @@ def draw_example(c: canvas.Canvas, x0: float, y_top: float) -> float:
         c.line(sx, body_top - len(rows) * rh, sx, body_top)
     c.setStrokeColor(FRAME)
     c.setLineWidth(1.0)
-    c.rect(x0, body_top - len(rows) * rh, total_w, len(rows) * rh + 6 * mm, stroke=1, fill=0)
+    c.rect(x0, body_top - len(rows) * rh, total_w, len(rows) * rh + 4.8 * mm, stroke=1, fill=0)
     c.line(x0 + tw, body_top - len(rows) * rh, x0 + tw, y_top)
 
     def box(i_from: int, i_to: int) -> None:
-        """i_from 行目の上 〜 i_to 行目の下 をなぞった四角（ペンの太線）"""
         c.setStrokeColor(black)
-        c.setLineWidth(1.8)
-        y1 = body_top - i_from * rh
-        y2 = body_top - (i_to + 1) * rh
-        c.line(x0 + tw, y1, x0 + total_w, y1)
-        c.line(x0 + tw, y2, x0 + total_w, y2)
+        c.setLineWidth(1.6)
+        c.line(x0 + tw, body_top - i_from * rh, x0 + total_w, body_top - i_from * rh)
+        c.line(x0 + tw, body_top - (i_to + 1) * rh, x0 + total_w, body_top - (i_to + 1) * rh)
 
     def write(i: int, start: str, name: str, course: str) -> None:
-        y = body_top - i * rh - rh / 2 - 1.4 * mm
-        c.setFont(JP_MIN, 10)
+        y = body_top - i * rh - rh / 2 - 1.3 * mm
+        c.setFont(JP_MIN, 9.5)
         sx = x0 + tw
         for text, w in zip((start, name, course), widths):
             c.drawCentredString(sx + w / 2, y, text)
             sx += w
 
-    # 10:00〜10:45 田中 C2（35 分）
     box(0, 2)
     write(0, "10:00", "田中", "C2")
-    # 10:45〜11:45 佐藤① C1+M（55 分）。前の予約と線を共有する
     box(3, 6)
     write(3, "10:45", "佐藤①", "C1+M")
+    # 取り消した予約: 四角の中に大きく ✖
+    box(7, 8)
+    write(7, "11:45", "鈴木", "C5")
+    c.setStrokeColor(black)
+    c.setLineWidth(1.8)
+    c.line(x0 + tw + 4 * mm, body_top - 7 * rh - 1.2 * mm,
+           x0 + total_w - 4 * mm, body_top - 9 * rh + 1.2 * mm)
+    c.line(x0 + tw + 4 * mm, body_top - 9 * rh + 1.2 * mm,
+           x0 + total_w - 4 * mm, body_top - 7 * rh - 1.2 * mm)
 
-    # 説明
-    c.setFont(JP, 7.8)
+    notes_x = x0 + total_w + 5 * mm
+    c.setFont(JP, 7.2)
     c.setFillColor(GRAY_TEXT)
-    ex = x0 + total_w + 5 * mm
     notes = [
-        (body_top - 1.5 * rh, "← 10:00 の上と 10:45 の上の破線をなぞって四角にする"),
-        (body_top - 2.2 * rh, "　 最初の行に 開始・名前・コース を書く"),
-        (body_top - 4.5 * rh, "← 続けて入る予約は、前の四角の下の線をそのまま使う"),
-        (body_top - 5.2 * rh, "　 ① は新規のお客様。下のお客様メモの ① に電話番号を書く"),
-        (body_top - 7.6 * rh, "← なぞっていない所（11:45〜）は空き"),
+        (1.5, "← 10:00 と 10:45 の破線をなぞって四角に"),
+        (2.2, "　 最初の行に 開始・名前・コース（C2 = 35分）"),
+        (4.5, "← 続く予約は前の四角の下の線をそのまま使う"),
+        (5.2, "　 C1+M = カット顔剃り＋眉毛剃。① は新規のお客様"),
+        (9.6, "← なぞっていない所（12:15〜）は空き"),
     ]
-    for y, text in notes:
-        c.drawString(ex, y, text)
+    for k, text in notes:
+        c.drawString(notes_x, body_top - k * rh, text)
     c.setFillColor(black)
-
+    c.setFillColor(GRAY_TEXT)
+    text_with_cross(c, notes_x, body_top - 7.9 * rh,
+                    ["← 四角の中に大きく ", " ＝ この予約は無効（取り消し）"], size=7.2)
+    c.setFillColor(black)
     return body_top - len(rows) * rh
 
 
-def draw_page2(c: canvas.Canvas) -> None:
-    draw_fiducials(c)
-    top = PAGE_H - MARGIN
-    left = MARGIN
-    right = PAGE_W - MARGIN
-
-    c.setFont(JP, 16)
-    c.drawString(left + 6 * mm, top - 7 * mm, "書き方とお客様メモ")
-
-    y = top - 17 * mm
+def draw_memo(c: canvas.Canvas, top: float) -> None:
+    left = MX
+    right = PAGE_W - MX
     c.setFont(JP, 10)
-    c.drawString(left + 6 * mm, y, "■ 書き方")
-    lines = [
-        "1. 上の日付欄に「月」「日」「曜」を書きます。お休みの日は「休」の四角に印を入れてください。",
-        "2. 予約が入ったら、その時間帯の上と下の破線をペンでなぞって、四角で囲みます。",
-        "   四角の上の線が開始、下の線が終了の時刻です（1 行 = 15 分）。",
-        "3. 四角の中の最初の行に、「開始」「名前」「コース」を書きます。欄からはみ出さないように。",
-        "4. 名前は姓だけで構いません。メニューは 1 ページ目の記号で書きます。",
-        "   コース記号を先に書き、オプションを付ける場合だけ「+記号」を続けます。",
-        "     C2 … カット・シャンプー のみ　／　C2+S … カット・シャンプー ＋ お顔剃り",
-        "     K1+H+E … カラー ＋ 頭皮スパ ＋ 耳洗い（オプションが 2 つ以上なら + でつなぐ）",
-        "5. 取り消しは、四角の中に大きく × を書いてください。塗りつぶさないでください。",
-        "6. 新規のお客様は名前の横に ① ② … を付け、下の「お客様メモ」に電話番号を書きます。",
-        "7. 1 週間分書けたら、1 ページ目（と、書いた場合はこのページ）を真上から写真に撮り、",
-        "   管理画面の「手書き予約の取り込み」から登録します。四隅の黒い四角が写るように撮ってください。",
-    ]
-    c.setFont(JP, 8.5)
-    for i, s in enumerate(lines):
-        c.drawString(left + 10 * mm, y - 6 * mm - i * 5 * mm, s)
+    c.drawString(left, top, "■ お客様メモ（新規のお客様・電話番号が分かっている方）")
 
-    ey = y - 6 * mm - len(lines) * 5 * mm - 7 * mm
-    c.setFont(JP, 10)
-    c.drawString(left + 6 * mm, ey, "■ 記入例")
-    bottom = draw_example(c, left + 10 * mm, ey - 4 * mm)
-
-    # お客様メモ
-    my = bottom - 11 * mm
-    c.setFont(JP, 10)
-    c.drawString(left + 6 * mm, my, "■ お客様メモ（新規のお客様・電話番号が分かっている方）")
-
-    cols = [("No.", 12 * mm), ("お名前", 52 * mm), ("お電話番号", 52 * mm),
-            ("メニュー", 40 * mm), ("備考", 0)]
+    cols = [("No.", 10 * mm), ("お名前", 40 * mm), ("お電話番号", 42 * mm),
+            ("コース", 28 * mm), ("備考", 0)]
     table_w = right - left
     fixed = sum(w for _, w in cols if w)
     cols[-1] = (cols[-1][0], table_w - fixed)
 
-    rh = 9 * mm
-    ty = my - 5 * mm
-    rows = max(8, int((ty - (MARGIN + 12 * mm)) / rh) - 1)
+    rh = 7.4 * mm
+    ty = top - 3 * mm
+    rows = max(6, int((ty - (MY_BOTTOM + FOOT_H + 2 * mm)) / rh) - 1)
 
     c.setFillColor(HEAD_FILL)
     c.rect(left, ty - rh, table_w, rh, stroke=0, fill=1)
     c.setFillColor(black)
     x = left
-    c.setFont(JP, 8.5)
+    c.setFont(JP, 7.8)
     for name, w in cols:
-        c.drawString(x + 2 * mm, ty - rh + 3 * mm, name)
+        c.drawString(x + 1.8 * mm, ty - rh + 2.6 * mm, name)
         x += w
     for r in range(rows + 1):
-        yy = ty - rh - r * rh
         c.setStrokeColor(SUB_LINE)
         c.setLineWidth(0.4)
-        c.line(left, yy, right, yy)
+        c.line(left, ty - rh - r * rh, right, ty - rh - r * rh)
     x = left
     c.setStrokeColor(GRAY_TEXT)
     c.setLineWidth(0.6)
@@ -556,38 +640,48 @@ def draw_page2(c: canvas.Canvas) -> None:
     c.line(left, ty - rh, right, ty - rh)
 
     circled = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
-    c.setFont(JP, 8.5)
+    c.setFont(JP, 8)
     c.setFillColor(GRAY_TEXT)
     for r in range(rows):
-        yy = ty - rh - (r + 1) * rh
         mark = circled[r] if r < len(circled) else str(r + 1)
-        c.drawCentredString(left + 6 * mm, yy + 3 * mm, mark)
+        c.drawCentredString(left + 5 * mm, ty - rh - (r + 1) * rh + 2.5 * mm, mark)
     c.setFillColor(black)
 
-    c.setFont(JP, 6.8)
+
+def draw_reference_page(c: canvas.Canvas, page_no: int, codes: dict, info: dict) -> None:
+    draw_fiducials(c)
+    top = PAGE_H - MY_TOP
+    c.setFont(JP, 14)
+    c.drawString(MX, top - 5 * mm, "メニュー早見表・書き方・お客様メモ")
+    c.setFont(JP, 6.5)
     c.setFillColor(GRAY_TEXT)
-    c.drawRightString(right - 6 * mm, MARGIN + 1 * mm, "2 / 2")
+    c.drawRightString(PAGE_W - MX, top - 5 * mm, "STONE'S BARBER 予約表 3 ページ目")
     c.setFillColor(black)
+
+    y = draw_quick_reference(c, codes, info, top - 13 * mm)
+    y = draw_rules(c, codes, info, y - 7 * mm)
+    y = draw_example(c, y - 3 * mm)
+    draw_memo(c, y - 8 * mm)
+    footer(c, page_no, "この 3 ページ目も、お客様メモを書いたときは一緒に写真に撮って取り込んでください")
 
 
 # =============================================================================
 def build(path: str) -> None:
     codes = load_codes()
-    prices = load_prices()
+    info = load_menu_info()
     print(f"  メニュー記号 {len(codes['main'])} + オプション {len(codes['options'])}"
-          f" ／ 料金 {'あり' if prices else 'なし'}")
+          f" ／ 料金・所要時間 {'あり' if info else 'なし'}")
 
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    c = canvas.Canvas(path, pagesize=A3)
-    c.setTitle("STONE'S BARBER 予約表（手書き用）")
+    c = canvas.Canvas(path, pagesize=A4)
+    c.setTitle("STONE'S BARBER 予約表（手書き用・A4）")
     c.setAuthor("STONE'S BARBER")
 
-    draw_fiducials(c)
-    draw_header(c, codes, prices)
-    draw_grid(c)
-    c.showPage()
+    for i, (label, columns, days) in enumerate(SHEET_PAGES, start=1):
+        draw_sheet_page(c, i, label, columns, days)
+        c.showPage()
 
-    draw_page2(c)
+    draw_reference_page(c, TOTAL_PAGES, codes, info)
     c.showPage()
     c.save()
 
@@ -596,4 +690,4 @@ if __name__ == "__main__":
     out = sys.argv[1] if len(sys.argv) > 1 else str(ROOT / "public" / "booking-sheet.pdf")
     build(out)
     print("書き出しました:", out)
-    print(f"  A3 縦 / 2 ページ / {ROWS} 行（{hhmm(START_MIN)}〜{hhmm(END_MIN)} 15分刻み・横線はすべて破線）")
+    print(f"  A4 縦 / {TOTAL_PAGES} ページ（火水木・金土日・早見表） / {ROWS} 行（15分刻み）")

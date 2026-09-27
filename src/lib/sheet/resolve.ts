@@ -87,26 +87,59 @@ function ymd(y: number, m: number, d: number): string {
 // 日付
 // -----------------------------------------------------------------------------
 
+/** 用紙の列 A〜F の曜日（月曜は定休なので用紙に無い）。A = 火 … F = 日 */
+export const COLUMN_WEEKDAYS: Record<SheetColumn, string> = {
+  A: "火",
+  B: "水",
+  C: "木",
+  D: "金",
+  E: "土",
+  F: "日",
+};
+const DOW_JA = ["日", "月", "火", "水", "木", "金", "土"];
+
+function weekdayOf(dateStr: string): string {
+  // 正午(JST) = 同じ日の 03:00 UTC なので、UTC の曜日で JST の曜日が取れる
+  return DOW_JA[new Date(`${dateStr}T12:00:00+09:00`).getUTCDay()]!;
+}
+
+function slash(dateStr: string): string {
+  return `${Number(dateStr.slice(5, 7))}/${Number(dateStr.slice(8, 10))}`;
+}
+
 /**
- * A 列の日付（週の始まり）を決める。
- *   用紙に書かれた「この用紙の週」 → 画面で指定された週 → A 列の手書きの月日
+ * 週の始まり（A 列 = 火曜日の日付）を決める。
+ *   用紙の「この週の火曜日」 → 画面で指定された日付 → どれかの列の手書きの月日から逆算
+ * どのページか 1 枚だけ撮った場合（金土日だけ等）でも決まるよう、A 列に限らず逆算する。
  */
 function resolveWeekStart(
   ex: SheetExtraction,
   fallbackWeekStart: string | null,
-): string {
+): { weekStart: string; warning: string | null } {
+  let weekStart = "";
   const y = ex.week_year;
   const m = ex.week_month;
   const d = ex.week_day;
-  if (y && m && d && isValidDate(y, m, d)) return ymd(y, m, d);
-  if (fallbackWeekStart) return fallbackWeekStart;
-
-  const colA = ex.columns.find((c) => c.column.trim().toUpperCase() === "A");
-  if (colA?.month && colA.day) {
+  if (y && m && d && isValidDate(y, m, d)) {
+    weekStart = ymd(y, m, d);
+  } else if (fallbackWeekStart) {
+    weekStart = fallbackWeekStart;
+  } else {
     const year = Number(formatDateJst(new Date()).slice(0, 4));
-    if (isValidDate(year, colA.month, colA.day)) return ymd(year, colA.month, colA.day);
+    for (const col of ex.columns) {
+      const c = normalizeColumn(col.column);
+      if (!c || !col.month || !col.day || !isValidDate(year, col.month, col.day)) continue;
+      weekStart = addDays(ymd(year, col.month, col.day), -SHEET_COLUMNS.indexOf(c));
+      break;
+    }
   }
-  return "";
+  if (weekStart && weekdayOf(weekStart) !== "火") {
+    return {
+      weekStart,
+      warning: `週の始まり（${slash(weekStart)}）が火曜日ではありません（${weekdayOf(weekStart)}曜日）。「この週の火曜日」の日付を確認してください`,
+    };
+  }
+  return { weekStart, warning: null };
 }
 
 /** 列ごとの日付。手書きの月日を優先し、読めなければ 週の始まり + 列番号 */
@@ -115,9 +148,11 @@ function resolveColumnDate(
   column: SheetColumn,
   month: number | null,
   day: number | null,
-): { date: string; warning: string | null } {
+): { date: string; warnings: string[] } {
   const idx = SHEET_COLUMNS.indexOf(column);
   const byWeek = weekStart ? addDays(weekStart, idx) : "";
+  const expectDow = COLUMN_WEEKDAYS[column];
+  const label = `列 ${column}（${expectDow}）`;
 
   if (month && day) {
     // 年は週の始まりから取る。12 月の週に 1 月の日付が出てきたら翌年。
@@ -126,17 +161,19 @@ function resolveColumnDate(
     const year = baseMonth === 12 && month === 1 ? baseYear + 1 : baseYear;
     if (isValidDate(year, month, day)) {
       const written = ymd(year, month, day);
-      if (byWeek && written !== byWeek) {
-        return {
-          date: written,
-          warning: `列 ${column} の日付（${month}/${day}）が週の並び（${byWeek.slice(5).replace("-", "/")}）と合いません`,
-        };
+      const warnings: string[] = [];
+      // 曜日は印刷済みなので、書かれた日付の曜日が合っていなければ書き間違い
+      const actual = weekdayOf(written);
+      if (actual !== expectDow) {
+        warnings.push(`${label}に書かれた日付 ${month}/${day} は${actual}曜日です。日付を確認してください`);
+      } else if (byWeek && written !== byWeek) {
+        warnings.push(`${label}の日付（${month}/${day}）が「この週の火曜日」からの並び（${slash(byWeek)}）と合いません`);
       }
-      return { date: written, warning: null };
+      return { date: written, warnings };
     }
   }
-  if (byWeek) return { date: byWeek, warning: null };
-  return { date: "", warning: `列 ${column} の日付が読めません` };
+  if (byWeek) return { date: byWeek, warnings: [] };
+  return { date: "", warnings: [`${label}の日付が読めません`] };
 }
 
 // -----------------------------------------------------------------------------
@@ -457,11 +494,31 @@ export async function buildDraftRows(
   if (!ex.sheet_found) {
     sheetWarnings.unshift("写真から予約表を見つけられませんでした。写真を確認してください。");
   }
+  // 取り込み日は「取り込んだ後に書く欄」。書いてあれば、この用紙は取り込み済みの可能性が高い。
+  if (ex.import_month && ex.import_day) {
+    sheetWarnings.unshift(
+      `この用紙には取り込み日（${ex.import_month}/${ex.import_day}）が書かれています。`
+      + "すでに取り込み済みの可能性があります。重複の表示をよく確認してください。",
+    );
+  }
 
-  const weekStart = resolveWeekStart(ex, fallbackWeekStart);
+  const { weekStart, warning: weekWarning } = resolveWeekStart(ex, fallbackWeekStart);
+  if (weekWarning) sheetWarnings.push(weekWarning);
   const [bySlug, customers] = await Promise.all([fetchMenusBySlug(), fetchAllCustomers()]);
 
-  // お客様メモ（2 ページ目）: 丸数字 → 電話番号
+  // 撮り忘れのページがないか（予約表 1/2 = A〜C、2/2 = D〜F）
+  const seenColumns = new Set(
+    ex.columns.map((c) => normalizeColumn(c.column)).filter((c): c is SheetColumn => c !== null),
+  );
+  const hasFirst = ["A", "B", "C"].some((c) => seenColumns.has(c as SheetColumn));
+  const hasSecond = ["D", "E", "F"].some((c) => seenColumns.has(c as SheetColumn));
+  if (hasFirst && !hasSecond) {
+    sheetWarnings.push("予約表 2/2（金・土・日）が写っていません。撮り忘れていないか確認してください。");
+  } else if (!hasFirst && hasSecond) {
+    sheetWarnings.push("予約表 1/2（火・水・木）が写っていません。撮り忘れていないか確認してください。");
+  }
+
+  // お客様メモ（3 ページ目）: 丸数字 → 電話番号
   const memoPhones = new Map<number, string>();
   for (const c of ex.contacts) {
     if (c.phone.trim()) memoPhones.set(c.no, c.phone.trim());
@@ -478,8 +535,8 @@ export async function buildDraftRows(
       continue;
     }
     closedByColumn.set(column, col.closed);
-    const { date, warning } = resolveColumnDate(weekStart, column, col.month, col.day);
-    if (warning) sheetWarnings.push(warning);
+    const { date, warnings: dateWarnings } = resolveColumnDate(weekStart, column, col.month, col.day);
+    sheetWarnings.push(...dateWarnings);
 
     for (const b of col.bookings) {
       seq += 1;

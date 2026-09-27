@@ -253,7 +253,7 @@ export function ImportFlow({ configured }: { configured: boolean }) {
           <CardContent className="space-y-2 py-1 text-sm">
             {meta.weekStart && (
               <p>
-                用紙の週: <strong>{dateLabel(meta.weekStart)}</strong> から（A 列）
+                この週の火曜日: <strong>{dateLabel(meta.weekStart)}</strong>
               </p>
             )}
             {meta.sheetWarnings.map((w, i) => (
@@ -339,30 +339,43 @@ function UploadPanel({
 }) {
   const [page1, setPage1] = React.useState<File | null>(null);
   const [page2, setPage2] = React.useState<File | null>(null);
+  const [page3, setPage3] = React.useState<File | null>(null);
   const [weekStart, setWeekStart] = React.useState("");
+  const photos = [page1, page2, page3].filter((f): f is File => f !== null);
+  const hasSheet = page1 !== null || page2 !== null;
 
   return (
     <Card>
       <CardContent className="space-y-5 py-2">
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-3">
           <PhotoPicker
             id="page1"
-            label="予約表（1ページ目）"
-            required
+            label="予約表 1/2（火・水・木）"
             file={page1}
             onChange={setPage1}
           />
           <PhotoPicker
             id="page2"
-            label="お客様メモ（2ページ目・任意）"
-            hint="新規のお客様の電話番号を書いた場合に一緒に撮ってください"
+            label="予約表 2/2（金・土・日）"
             file={page2}
             onChange={setPage2}
           />
+          <PhotoPicker
+            id="page3"
+            label="3ページ目（お客様メモ・任意）"
+            hint="新規のお客様の電話番号を書いたときだけ撮ってください"
+            file={page3}
+            onChange={setPage3}
+          />
         </div>
+        {!hasSheet && (
+          <p className="text-xs text-zinc-500">
+            予約表 1/2・2/2 のうち、少なくとも 1 枚を選んでください（予約を書いたページだけで構いません）。
+          </p>
+        )}
 
         <div className="space-y-1.5">
-          <Label htmlFor="weekStart">この用紙の週（A 列の日付）</Label>
+          <Label htmlFor="weekStart">この週の火曜日</Label>
           <Input
             id="weekStart"
             type="date"
@@ -380,15 +393,17 @@ function UploadPanel({
           <ul className="mt-1 list-disc space-y-0.5 pl-4">
             <li>用紙の四隅の黒い四角が全部写るように、真上から撮ってください。</li>
             <li>明るい場所で、影や反射が入らないようにしてください。</li>
+            <li>1 枚の写真に 1 ページずつ撮ってください（2 ページを並べて 1 枚に撮らない）。</li>
             <li>読み取りには 1〜2 分かかることがあります。画面を閉じずにお待ちください。</li>
+            <li>登録が終わったら、用紙の「取り込み日」に今日の日付を書いてください。</li>
           </ul>
         </div>
 
         <Button
           size="lg"
           className="h-12 w-full font-bold sm:w-auto"
-          disabled={!configured || !page1 || pending}
-          onClick={() => page1 && onRead(page2 ? [page1, page2] : [page1], weekStart)}
+          disabled={!configured || !hasSheet || pending}
+          onClick={() => hasSheet && onRead(photos, weekStart)}
         >
           {pending ? (
             <>

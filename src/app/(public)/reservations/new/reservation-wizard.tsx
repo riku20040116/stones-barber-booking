@@ -34,6 +34,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { NoticeDialog, type Notice } from "@/components/ui/notice-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -149,6 +150,7 @@ export function ReservationWizard({
     React.useState<PaymentMethod>("in_store");
   const [pending, startTransition] = React.useTransition();
   const [submitError, setSubmitError] = React.useState<string | null>(null);
+  const [notice, setNotice] = React.useState<Notice | null>(null);
   const [submittedCode, setSubmittedCode] = React.useState<string | null>(null);
 
   // 完了画面へ遷移したら最上部へ
@@ -269,7 +271,8 @@ export function ReservationWizard({
         setSubmittedCode(res.code);
       } else {
         setSubmitError(res.error);
-        toast.error(res.error);
+        // 自動で消えるトーストだと見落とされるので、OK を押すまで閉じないポップアップで出す
+        setNotice({ title: "ご予約を確定できませんでした", message: res.error });
       }
     });
   }
@@ -400,6 +403,8 @@ export function ReservationWizard({
         onBack={goBack}
         onNext={isSubmitStep ? submit : tryGoNext}
       />
+
+      <NoticeDialog notice={notice} onOk={() => setNotice(null)} />
     </div>
   );
 }
