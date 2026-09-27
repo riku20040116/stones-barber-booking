@@ -63,11 +63,10 @@ export type DraftRow = {
 
   column: SheetColumn;
   date: string; // YYYY-MM-DD（読めなければ ""）
+  /** 四角の上辺の時刻（用紙に開始欄は無い） */
   start: string; // HH:MM
   end: string; // HH:MM
 
-  /** 「開始」欄に書かれていた時刻（照合用） */
-  writtenStart: string;
   name: string;
   courseText: string;
   codes: string[];

@@ -424,9 +424,6 @@ function computeWarnings(
   if (row.start && row.end && toMin(row.end) <= toMin(row.start)) {
     w.push("終了時刻が開始時刻より前になっています");
   }
-  if (row.writtenStart && row.start && row.writtenStart !== row.start) {
-    w.push(`「開始」欄の時刻（${row.writtenStart}）と四角の位置（${row.start}）が違います`);
-  }
   if (!row.name.trim()) w.push("名前が読めません");
   if (row.codes.filter((c) => !c.startsWith("+")).length === 0) {
     w.push("メニュー（C1〜T1）が読めません");
@@ -513,19 +510,20 @@ export async function buildDraftRows(
   if (weekWarning) sheetWarnings.push(weekWarning);
   const [bySlug, customers] = await Promise.all([fetchMenusBySlug(), fetchAllCustomers()]);
 
-  // 撮り忘れのページがないか（予約表 1/2 = A〜C、2/2 = D〜F）
+  // 写真に写っていない列がないか（用紙の端が切れている等）。
+  // 予約の無い列も「空の列」として返ってくるので、返ってこない列は写っていない。
   const seenColumns = new Set(
     ex.columns.map((c) => normalizeColumn(c.column)).filter((c): c is SheetColumn => c !== null),
   );
-  const hasFirst = ["A", "B", "C"].some((c) => seenColumns.has(c as SheetColumn));
-  const hasSecond = ["D", "E", "F"].some((c) => seenColumns.has(c as SheetColumn));
-  if (hasFirst && !hasSecond) {
-    sheetWarnings.push("予約表 2/2（金・土・日）が写っていません。撮り忘れていないか確認してください。");
-  } else if (!hasFirst && hasSecond) {
-    sheetWarnings.push("予約表 1/2（火・水・木）が写っていません。撮り忘れていないか確認してください。");
+  const missing = SHEET_COLUMNS.filter((c) => !seenColumns.has(c));
+  if (ex.sheet_found && missing.length > 0 && missing.length < SHEET_COLUMNS.length) {
+    sheetWarnings.push(
+      `列 ${missing.map((c) => `${c}（${COLUMN_WEEKDAYS[c]}）`).join("・")} が写っていないようです。`
+      + "用紙の端が切れていないか確認してください。",
+    );
   }
 
-  // お客様メモ（3 ページ目）: 丸数字 → 電話番号
+  // お客様メモ（2 ページ目）: 丸数字 → 電話番号
   const memoPhones = new Map<number, string>();
   for (const c of ex.contacts) {
     if (c.phone.trim()) memoPhones.set(c.no, c.phone.trim());
@@ -547,8 +545,8 @@ export async function buildDraftRows(
 
     for (const b of col.bookings) {
       seq += 1;
-      const start = normalizeTime(b.box_start) || normalizeTime(b.written_start);
-      const writtenStart = normalizeTime(b.written_start);
+      // 開始時刻は四角の上辺の位置だけで決まる（用紙に開始欄は無い）
+      const start = normalizeTime(b.box_start);
 
       // AI が記号に直したものと、手書きの文字列を解釈し直したものを合わせる
       const fromText = parseCourseText(b.course_text);
@@ -574,7 +572,6 @@ export async function buildDraftRows(
         date,
         start,
         end,
-        writtenStart,
         name: b.name.trim(),
         courseText: b.course_text.trim(),
         codes,

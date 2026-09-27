@@ -135,7 +135,7 @@ function resolutionLabel(r: Resolution, row: DraftRow): string {
 // =============================================================================
 // 本体
 // =============================================================================
-/** 取り込む写真 1 枚。sheet = 予約表 1/2・2/2、memo = 3 ページ目（お客様メモ） */
+/** 取り込む写真 1 枚。sheet = 予約表（1 ページ目）、memo = 2 ページ目（お客様メモ） */
 type PickedPhoto = { file: File; kind: "sheet" | "memo" };
 
 export function ImportFlow({
@@ -143,7 +143,7 @@ export function ImportFlow({
   sendsMemo,
 }: {
   configured: boolean;
-  /** 3 ページ目（電話番号入り）を読み取りに送れるか。無料版では送らない。 */
+  /** 2 ページ目（電話番号入り）を読み取りに送れるか。無料版では送らない。 */
   sendsMemo: boolean;
 }) {
   const [phase, setPhase] = React.useState<"upload" | "review" | "done">("upload");
@@ -358,52 +358,40 @@ function UploadPanel({
   pending: boolean;
   onRead: (images: PickedPhoto[], fallbackWeekStart: string) => void;
 }) {
-  const [page1, setPage1] = React.useState<File | null>(null);
-  const [page2, setPage2] = React.useState<File | null>(null);
-  const [page3, setPage3] = React.useState<File | null>(null);
+  const [sheet, setSheet] = React.useState<File | null>(null);
+  const [memo, setMemo] = React.useState<File | null>(null);
   const [weekStart, setWeekStart] = React.useState("");
   const photos: PickedPhoto[] = [
-    page1 && { file: page1, kind: "sheet" as const },
-    page2 && { file: page2, kind: "sheet" as const },
-    sendsMemo && page3 && { file: page3, kind: "memo" as const },
+    sheet && { file: sheet, kind: "sheet" as const },
+    sendsMemo && memo && { file: memo, kind: "memo" as const },
   ].filter((p): p is PickedPhoto => Boolean(p));
-  const hasSheet = page1 !== null || page2 !== null;
+  const hasSheet = sheet !== null;
 
   return (
     <Card>
       <CardContent className="space-y-5 py-2">
-        <div className={cn("grid gap-4", sendsMemo ? "md:grid-cols-3" : "md:grid-cols-2")}>
+        <div className={cn("grid gap-4", sendsMemo && "md:grid-cols-2")}>
           <PhotoPicker
-            id="page1"
-            label="予約表 1/2（火・水・木）"
-            file={page1}
-            onChange={setPage1}
-          />
-          <PhotoPicker
-            id="page2"
-            label="予約表 2/2（金・土・日）"
-            file={page2}
-            onChange={setPage2}
+            id="sheet"
+            label="予約表（1 ページ目・火〜日）"
+            required
+            file={sheet}
+            onChange={setSheet}
           />
           {sendsMemo && (
             <PhotoPicker
-              id="page3"
-              label="3ページ目（お客様メモ・任意）"
+              id="memo"
+              label="お客様メモ（2 ページ目・任意）"
               hint="新規のお客様の電話番号を書いたときだけ撮ってください"
-              file={page3}
-              onChange={setPage3}
+              file={memo}
+              onChange={setMemo}
             />
           )}
         </div>
         {!sendsMemo && configured && (
           <p className="rounded-md bg-sky-50 p-3 text-xs leading-relaxed text-sky-900">
-            無料版の読み取りでは、個人情報保護のため 3 ページ目（お客様メモ・電話番号）は送りません。
+            無料版の読み取りでは、個人情報保護のため 2 ページ目（お客様メモ・電話番号）は送りません。
             新規のお客様の電話番号は、読み取り後の確認画面で入力してください。
-          </p>
-        )}
-        {!hasSheet && (
-          <p className="text-xs text-zinc-500">
-            予約表 1/2・2/2 のうち、少なくとも 1 枚を選んでください（予約を書いたページだけで構いません）。
           </p>
         )}
 
@@ -426,7 +414,7 @@ function UploadPanel({
           <ul className="mt-1 list-disc space-y-0.5 pl-4">
             <li>用紙の四隅の黒い四角が全部写るように、真上から撮ってください。</li>
             <li>明るい場所で、影や反射が入らないようにしてください。</li>
-            <li>1 枚の写真に 1 ページずつ撮ってください（2 ページを並べて 1 枚に撮らない）。</li>
+            <li>予約表は横向きの用紙です。スマホも横向きにして、用紙全体をできるだけ大きく撮ってください（1 行が細いため）。</li>
             <li>読み取りには 1〜2 分かかることがあります。画面を閉じずにお待ちください。</li>
             <li>登録が終わったら、用紙の「取り込み日」に今日の日付を書いてください。</li>
           </ul>

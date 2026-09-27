@@ -15,7 +15,6 @@
         {
           "box_start": "10:15",
           "box_end": "11:00",
-          "written_start": "10:15",
           "name": "山田",
           "course_text": "C2",
           "course_codes": [
@@ -29,7 +28,6 @@
         {
           "box_start": "13:00",
           "box_end": "13:30",
-          "written_start": "13:00",
           "name": "佐藤",
           "course_text": "C5",
           "course_codes": [
@@ -51,7 +49,6 @@
         {
           "box_start": "10:00",
           "box_end": "10:45",
-          "written_start": "10:15",
           "name": "鈴木",
           "course_text": "C2+S",
           "course_codes": [
@@ -61,12 +58,11 @@
           "memo_no": null,
           "crossed_out": false,
           "confidence": "medium",
-          "remarks": "開始欄は 10:15 と読めるが、四角の上辺は 10:00 の線"
+          "remarks": ""
         },
         {
           "box_start": "10:30",
           "box_end": "12:00",
-          "written_start": "10:30",
           "name": "高橋",
           "course_text": "K1",
           "course_codes": [
@@ -88,7 +84,6 @@
         {
           "box_start": "16:00",
           "box_end": "17:00",
-          "written_start": "16:00",
           "name": "伊藤",
           "course_text": "C9+SFS",
           "course_codes": [],
@@ -98,6 +93,27 @@
           "remarks": "メニュー記号が読みにくく、区切りも見えない"
         }
       ]
+    },
+    {
+      "column": "D",
+      "month": 8,
+      "day": 14,
+      "closed": false,
+      "bookings": []
+    },
+    {
+      "column": "E",
+      "month": 8,
+      "day": 15,
+      "closed": false,
+      "bookings": []
+    },
+    {
+      "column": "F",
+      "month": 8,
+      "day": 16,
+      "closed": false,
+      "bookings": []
     }
   ],
   "contacts": [
