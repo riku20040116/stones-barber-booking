@@ -42,6 +42,9 @@ export async function readSheetAction(input: {
   if (images.some((i) => !ALLOWED_TYPES.has(i.mediaType))) {
     return { ok: false, error: "写真は JPEG / PNG / WebP でお願いします。" };
   }
+  if (images.some((i) => i.kind !== "sheet" && i.kind !== "memo")) {
+    return { ok: false, error: "写真の種類が不正です。" };
+  }
   const fallback =
     input.fallbackWeekStart && /^\d{4}-\d{2}-\d{2}$/.test(input.fallbackWeekStart)
       ? input.fallbackWeekStart
@@ -52,6 +55,12 @@ export async function readSheetAction(input: {
 
   try {
     const { rows, weekStart, sheetWarnings } = await buildDraftRows(res.extraction, fallback);
+    if (res.droppedMemo) {
+      sheetWarnings.unshift(
+        "無料版の読み取りでは、個人情報保護のためお客様メモ（電話番号）のページは送っていません。"
+        + "新規のお客様の電話番号は、下の各行で入力してください。",
+      );
+    }
     return { ok: true, rows, meta: { weekStart, sheetWarnings, model: res.model } };
   } catch (e) {
     console.error("[import] build rows error:", e);

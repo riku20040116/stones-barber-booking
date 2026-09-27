@@ -19,7 +19,7 @@ import {
 import { fetchHolidayOverridesInRange } from "@/lib/reservation/queries";
 import { formatDateJst, formatTimeJst, jstWallToUtc } from "@/lib/timezone";
 
-import type { SheetExtraction } from "./extract";
+import type { SheetExtraction } from "./schema";
 import { findCode, normalizeCode, parseCourseText } from "./menu-codes";
 import {
   SHEET_COLUMNS,
@@ -446,6 +446,13 @@ function computeWarnings(
       w.push(`四角の長さ（${boxMin}分）がメニューの所要時間（${row.menuDuration}分）より短いです`);
     }
   }
+  if (row.crossedOut) {
+    w.push(
+      row.include
+        ? "用紙では ✖ で取り消されています。本当に登録してよいか確認してください"
+        : "用紙で ✖ がかぶせてあるため、取り消し（無効）として登録しません。読み違いなら「登録する」にチェックしてください",
+    );
+  }
   if (row.customer.mode === "unset") w.push("どのお客様か選んでください");
   if (row.confidence !== "high") {
     w.push(row.confidence === "low" ? "読み取りの自信が低い行です" : "読み取りに自信がない部分があります");
@@ -560,7 +567,9 @@ export async function buildDraftRows(
 
       rows.push({
         key: `r${seq}`,
-        include: true,
+        // ✖ をかぶせた予約は「登録しない」で出す（読み違いなら人がチェックを入れる）
+        include: !b.crossed_out,
+        crossedOut: b.crossed_out,
         column,
         date,
         start,

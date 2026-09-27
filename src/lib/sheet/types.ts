@@ -55,6 +55,11 @@ export type Resolution =
 export type DraftRow = {
   key: string;
   include: boolean;
+  /**
+   * 用紙で ✖ をかぶせてある（取り消し）。登録しない状態で表示し、
+   * AI の読み違いなら人がチェックを入れて登録できるようにする。
+   */
+  crossedOut: boolean;
 
   column: SheetColumn;
   date: string; // YYYY-MM-DD（読めなければ ""）

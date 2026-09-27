@@ -13,7 +13,7 @@ A4 1 枚に 6 日分を入れると 15 分の行が 3.9mm しか取れず書き�
   - 時刻の区切りの横線はすべて破線。予約が入ったら上下の破線をなぞって四角にする。
     四角の上辺 = 開始、下辺 = 終了。
   - 四角の最初の行に「開始」「名前」「コース」を書く。欄は固定。
-  - ✖ を書いた予約は無効（取り消し）。
+  - 取り消すときは、開始・名前・コースを書いた枠の上から ✖ をかぶせる（無効になる）。
   - 写真を撮って取り込んだら「取り込み日」を書く（二重の取り込みを防ぐ）。
 
 AI（写真からの読み取り）に向けた工夫:
@@ -257,7 +257,8 @@ def draw_sheet_header(c: canvas.Canvas, page_label: str, days: list[str]) -> Non
     c.drawString(left, top - 11 * mm, "予約が入ったら上下の破線をなぞって四角で囲み、")
     c.drawString(left, top - 14.5 * mm, "最初の行に 開始・名前・コース を書く")
     text_with_cross(c, left, top - 18 * mm,
-                    ["", " を書いた予約は無効（取り消し）　記号・所要時間は 3 ページ目"], size=7)
+                    ["取り消すときは 開始・名前・コース の上から ",
+                     " をかぶせる（無効）　記号・所要時間は 3 ページ目"], size=7)
 
 
 def draw_sheet_grid(c: canvas.Canvas, columns: list[str], days: list[str]) -> None:
@@ -498,11 +499,16 @@ def draw_rules(c: canvas.Canvas, codes: dict, info: dict, top: float) -> float:
         y -= lh
 
     text_with_cross(c, left + 3 * mm, y, [
-        "5. ", " を書いた予約は無効（取り消し）です。四角の中に大きく ", " を書きます（記入例の 11:45）。塗りつぶさないでください。",
+        "5. 予約を取り消すときは、開始・名前・コースを書いた枠の上から大きく ",
+        " をかぶせます（記入例の 11:45）。",
+    ], size=7.6)
+    y -= lh
+    text_with_cross(c, left + 3 * mm, y, [
+        "   ", " をかぶせた予約は無効（キャンセル）になり、取り込んでも登録されません。塗りつぶさないでください。",
     ], size=7.6)
     y -= lh
     line("6. 新規のお客様は名前の横に ① ② … を付け、下の「お客様メモ」に電話番号を書きます。")
-    line("7. 1 週間分を写真に撮り（1〜3 ページ目、四隅の黒い四角が写るように真上から）、")
+    line("7. 1 週間分の予約表（1・2 ページ目）を、四隅の黒い四角が写るように真上から写真に撮り、")
     line("   管理画面「手書き予約の取り込み」で登録します。登録したら「取り込み日」を書きます。", color=GRAY_TEXT)
     return y
 
@@ -570,7 +576,7 @@ def draw_example(c: canvas.Canvas, top: float) -> float:
     write(0, "10:00", "田中", "C2")
     box(3, 6)
     write(3, "10:45", "佐藤①", "C1+M")
-    # 取り消した予約: 四角の中に大きく ✖
+    # 取り消した予約: 開始・名前・コースの上から ✖ をかぶせる
     box(7, 8)
     write(7, "11:45", "鈴木", "C5")
     c.setStrokeColor(black)
@@ -595,7 +601,7 @@ def draw_example(c: canvas.Canvas, top: float) -> float:
     c.setFillColor(black)
     c.setFillColor(GRAY_TEXT)
     text_with_cross(c, notes_x, body_top - 7.9 * rh,
-                    ["← 四角の中に大きく ", " ＝ この予約は無効（取り消し）"], size=7.2)
+                    ["← 開始・名前・コースの上から ", " ＝ 取り消し（無効）"], size=7.2)
     c.setFillColor(black)
     return body_top - len(rows) * rh
 
@@ -662,7 +668,7 @@ def draw_reference_page(c: canvas.Canvas, page_no: int, codes: dict, info: dict)
     y = draw_rules(c, codes, info, y - 7 * mm)
     y = draw_example(c, y - 3 * mm)
     draw_memo(c, y - 8 * mm)
-    footer(c, page_no, "この 3 ページ目も、お客様メモを書いたときは一緒に写真に撮って取り込んでください")
+    footer(c, page_no, "お客様メモの電話番号は、取り込みの確認画面で入力・確認します")
 
 
 # =============================================================================

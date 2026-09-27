@@ -22,6 +22,7 @@
             "C2"
           ],
           "memo_no": null,
+          "crossed_out": false,
           "confidence": "high",
           "remarks": ""
         },
@@ -35,6 +36,7 @@
             "C5"
           ],
           "memo_no": 1,
+          "crossed_out": false,
           "confidence": "high",
           "remarks": ""
         }
@@ -57,6 +59,7 @@
             "+S"
           ],
           "memo_no": null,
+          "crossed_out": false,
           "confidence": "medium",
           "remarks": "開始欄は 10:15 と読めるが、四角の上辺は 10:00 の線"
         },
@@ -70,6 +73,7 @@
             "K1"
           ],
           "memo_no": null,
+          "crossed_out": true,
           "confidence": "high",
           "remarks": ""
         }
@@ -89,6 +93,7 @@
           "course_text": "C9+SFS",
           "course_codes": [],
           "memo_no": null,
+          "crossed_out": false,
           "confidence": "low",
           "remarks": "メニュー記号が読みにくく、区切りも見えない"
         }

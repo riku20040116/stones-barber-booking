@@ -7,18 +7,19 @@ import { DownloadIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { isSheetReaderConfigured } from "@/lib/sheet/extract";
+import { getSheetReader } from "@/lib/sheet/extract";
 import { ImportFlow } from "./import-flow";
 
 export const metadata = {
   title: "手書き予約表の取り込み | 管理画面",
 };
 
-// 写真 2 枚の読み取りに 1〜2 分かかることがあるため、処理時間の上限を延ばす
+// 写真の読み取りに 1〜2 分かかることがあるため、処理時間の上限を延ばす
 export const maxDuration = 300;
 
 export default function AdminImportPage() {
-  const configured = isSheetReaderConfigured();
+  const reader = getSheetReader();
+  const configured = reader.provider !== null;
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 p-4 md:p-8">
@@ -33,21 +34,24 @@ export default function AdminImportPage() {
           予約表を写真に撮って選ぶと、AI が読み取って予約の一覧にします。
           内容を確認・修正してから登録してください（読み取っただけでは登録されません）。
         </p>
-        <div className="pt-1">
+        <div className="flex flex-wrap items-center gap-3 pt-1">
           <Button
             variant="outline"
             size="sm"
             render={<a href="/booking-sheet.pdf" target="_blank" rel="noopener noreferrer" />}
           >
-            <DownloadIcon /> 予約表（印刷用 PDF）
+            <DownloadIcon /> 予約表（印刷用 PDF・A4）
           </Button>
+          {configured && (
+            <span className="text-xs text-zinc-500">読み取り: {reader.label}</span>
+          )}
         </div>
       </header>
 
       {!configured && (
         <Alert variant="destructive">
           <AlertDescription>
-            写真の読み取り機能がまだ設定されていません（ANTHROPIC_API_KEY が未設定）。
+            写真の読み取り機能がまだ設定されていません（GEMINI_API_KEY が未設定）。
             設定が済むまでは、
             <Link href="/admin/reservations/new" className="underline">
               手動予約登録
@@ -57,7 +61,7 @@ export default function AdminImportPage() {
         </Alert>
       )}
 
-      <ImportFlow configured={configured} />
+      <ImportFlow configured={configured} sendsMemo={reader.sendsMemo} />
     </div>
   );
 }

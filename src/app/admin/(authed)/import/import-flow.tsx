@@ -135,7 +135,17 @@ function resolutionLabel(r: Resolution, row: DraftRow): string {
 // =============================================================================
 // 本体
 // =============================================================================
-export function ImportFlow({ configured }: { configured: boolean }) {
+/** 取り込む写真 1 枚。sheet = 予約表 1/2・2/2、memo = 3 ページ目（お客様メモ） */
+type PickedPhoto = { file: File; kind: "sheet" | "memo" };
+
+export function ImportFlow({
+  configured,
+  sendsMemo,
+}: {
+  configured: boolean;
+  /** 3 ページ目（電話番号入り）を読み取りに送れるか。無料版では送らない。 */
+  sendsMemo: boolean;
+}) {
   const [phase, setPhase] = React.useState<"upload" | "review" | "done">("upload");
   const [rows, setRows] = React.useState<DraftRow[]>([]);
   const [meta, setMeta] = React.useState<SheetMeta | null>(null);
@@ -149,11 +159,13 @@ export function ImportFlow({ configured }: { configured: boolean }) {
     setDirty(true);
   }
 
-  function handleRead(images: File[], fallbackWeekStart: string) {
+  function handleRead(images: PickedPhoto[], fallbackWeekStart: string) {
     startTransition(async () => {
       let payload;
       try {
-        payload = await Promise.all(images.map(fileToJpeg));
+        payload = await Promise.all(
+          images.map(async (p) => ({ kind: p.kind, ...(await fileToJpeg(p.file)) })),
+        );
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "写真の準備に失敗しました");
         return;
@@ -224,7 +236,14 @@ export function ImportFlow({ configured }: { configured: boolean }) {
   }
 
   if (phase === "upload") {
-    return <UploadPanel configured={configured} pending={pending} onRead={handleRead} />;
+    return (
+      <UploadPanel
+        configured={configured}
+        sendsMemo={sendsMemo}
+        pending={pending}
+        onRead={handleRead}
+      />
+    );
   }
 
   if (phase === "done") {
@@ -330,24 +349,30 @@ export function ImportFlow({ configured }: { configured: boolean }) {
 // =============================================================================
 function UploadPanel({
   configured,
+  sendsMemo,
   pending,
   onRead,
 }: {
   configured: boolean;
+  sendsMemo: boolean;
   pending: boolean;
-  onRead: (images: File[], fallbackWeekStart: string) => void;
+  onRead: (images: PickedPhoto[], fallbackWeekStart: string) => void;
 }) {
   const [page1, setPage1] = React.useState<File | null>(null);
   const [page2, setPage2] = React.useState<File | null>(null);
   const [page3, setPage3] = React.useState<File | null>(null);
   const [weekStart, setWeekStart] = React.useState("");
-  const photos = [page1, page2, page3].filter((f): f is File => f !== null);
+  const photos: PickedPhoto[] = [
+    page1 && { file: page1, kind: "sheet" as const },
+    page2 && { file: page2, kind: "sheet" as const },
+    sendsMemo && page3 && { file: page3, kind: "memo" as const },
+  ].filter((p): p is PickedPhoto => Boolean(p));
   const hasSheet = page1 !== null || page2 !== null;
 
   return (
     <Card>
       <CardContent className="space-y-5 py-2">
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className={cn("grid gap-4", sendsMemo ? "md:grid-cols-3" : "md:grid-cols-2")}>
           <PhotoPicker
             id="page1"
             label="予約表 1/2（火・水・木）"
@@ -360,14 +385,22 @@ function UploadPanel({
             file={page2}
             onChange={setPage2}
           />
-          <PhotoPicker
-            id="page3"
-            label="3ページ目（お客様メモ・任意）"
-            hint="新規のお客様の電話番号を書いたときだけ撮ってください"
-            file={page3}
-            onChange={setPage3}
-          />
+          {sendsMemo && (
+            <PhotoPicker
+              id="page3"
+              label="3ページ目（お客様メモ・任意）"
+              hint="新規のお客様の電話番号を書いたときだけ撮ってください"
+              file={page3}
+              onChange={setPage3}
+            />
+          )}
         </div>
+        {!sendsMemo && configured && (
+          <p className="rounded-md bg-sky-50 p-3 text-xs leading-relaxed text-sky-900">
+            無料版の読み取りでは、個人情報保護のため 3 ページ目（お客様メモ・電話番号）は送りません。
+            新規のお客様の電話番号は、読み取り後の確認画面で入力してください。
+          </p>
+        )}
         {!hasSheet && (
           <p className="text-xs text-zinc-500">
             予約表 1/2・2/2 のうち、少なくとも 1 枚を選んでください（予約を書いたページだけで構いません）。
@@ -522,6 +555,7 @@ function RowCard({
             登録する
           </label>
           <Badge variant="outline">列 {row.column}</Badge>
+          {row.crossedOut && <Badge variant="destructive">✖ 取り消し</Badge>}
           <span className="text-sm font-semibold">
             {dateLabel(row.date)} {row.start}〜{row.end}
           </span>
