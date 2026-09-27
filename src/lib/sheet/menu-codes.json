@@ -1,5 +1,13 @@
 {
-  "$comment": "手書き予約表のメニュー記号。予約表PDF（scripts/make_booking_sheet.py）と写真の取り込み（src/lib/sheet/）の両方がこのファイルを読む。記号を変えたら予約表PDFも作り直すこと。slug は menus テーブルの slug。",
+  "$comment": "手書き予約表のメニュー記号。予約表PDF（scripts/make_booking_sheet.py）と写真の取り込み（src/lib/sheet/）の両方がこのファイルを読む。記号を変えたら予約表PDFも作り直すこと。slug は menus テーブルの slug。aliases は昔の用紙で使っていた記号で、古い用紙を撮影しても読めるように残している。",
+  "rule": {
+    "text": "コース記号をまず書き、オプションを付ける場合だけ「+記号」を続ける",
+    "examples": [
+      { "write": "C2", "means": "カット・シャンプー のみ" },
+      { "write": "C2+S", "means": "カット・シャンプー ＋ お顔剃り" },
+      { "write": "K1+H+E", "means": "カラー ＋ 頭皮スパ ＋ 耳洗い" }
+    ]
+  },
   "main": [
     { "code": "C1", "slug": "cut-adult-shave", "label": "カット・シャンプー・顔剃り" },
     { "code": "C2", "slug": "cut-adult", "label": "カット・シャンプー" },
@@ -21,15 +29,15 @@
     { "code": "T1", "slug": "straighten-standard", "label": "縮毛矯正" }
   ],
   "options": [
-    { "code": "+剃", "slug": "opt-face-shave", "label": "お顔剃り" },
-    { "code": "+頭", "slug": "opt-scalp-spa", "label": "頭皮スパ" },
-    { "code": "+顔", "slug": "opt-face-spa", "label": "フェイススパ" },
-    { "code": "+パ", "slug": "opt-face-pack", "label": "フェイスパック" },
-    { "code": "+角", "slug": "opt-exfoliation", "label": "角質落とし" },
-    { "code": "+耳", "slug": "opt-ear-wash", "label": "耳洗い" },
-    { "code": "+鼻", "slug": "opt-nose-wax", "label": "鼻脱毛" },
-    { "code": "+眉", "slug": "opt-eyebrow-shave", "label": "眉毛剃" },
-    { "code": "+線", "slug": "opt-design-line", "label": "デザインライン" },
-    { "code": "+フ", "slug": "opt-skin-fade", "label": "スキンフェード" }
+    { "code": "+S", "slug": "opt-face-shave", "label": "お顔剃り", "aliases": ["剃"] },
+    { "code": "+H", "slug": "opt-scalp-spa", "label": "頭皮スパ", "aliases": ["頭"] },
+    { "code": "+FS", "slug": "opt-face-spa", "label": "フェイススパ", "aliases": ["顔"] },
+    { "code": "+FP", "slug": "opt-face-pack", "label": "フェイスパック", "aliases": ["パ"] },
+    { "code": "+K", "slug": "opt-exfoliation", "label": "角質落とし", "aliases": ["角"] },
+    { "code": "+E", "slug": "opt-ear-wash", "label": "耳洗い", "aliases": ["耳"] },
+    { "code": "+N", "slug": "opt-nose-wax", "label": "鼻脱毛", "aliases": ["鼻"] },
+    { "code": "+M", "slug": "opt-eyebrow-shave", "label": "眉毛剃", "aliases": ["眉"] },
+    { "code": "+L", "slug": "opt-design-line", "label": "デザインライン", "aliases": ["線"] },
+    { "code": "+SF", "slug": "opt-skin-fade", "label": "スキンフェード", "aliases": ["フ"] }
   ]
 }

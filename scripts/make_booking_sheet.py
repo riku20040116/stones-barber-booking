@@ -48,7 +48,7 @@ PAGE_W, PAGE_H = A3  # 縦: 297 x 420 mm
 # --- 版面 -------------------------------------------------------------------
 MARGIN = 10 * mm
 FIDUCIAL = 7 * mm
-HEADER_H = 61 * mm
+HEADER_H = 70 * mm
 DAY_HEAD_H = 17 * mm       # 日付欄＋「開始・名前・コース」の見出し
 FOOTER_H = 7 * mm
 TIME_COL_W = 13 * mm
@@ -240,6 +240,31 @@ def draw_header(c: canvas.Canvas, codes: dict, prices: dict[str, str]) -> None:
             ox = left + 16 * mm
         c.drawString(ox, oy, text)
         ox += w + 3.8 * mm
+
+    # 書き方のきまりと記載例
+    ry = oy - 5.6 * mm
+    rule = codes.get("rule", {})
+    c.setFont(JP, 8)
+    c.drawString(left, ry, "書き方")
+    c.setFont(JP, 7.5)
+    c.drawString(left + 16 * mm, ry, f"{rule.get('text', '')}")
+    rx = left + 16 * mm
+    ry2 = ry - 4.2 * mm
+    c.setFont(JP, 7.5)
+    for i, ex in enumerate(rule.get("examples", [])):
+        label = f"{ex['write']} = {ex['means']}"
+        c.setFillColor(black)
+        c.drawString(rx, ry2, ex["write"])
+        wcode = pdfmetrics.stringWidth(ex["write"], JP, 7.5)
+        c.setFillColor(GRAY_TEXT)
+        c.setFont(JP, 7)
+        c.drawString(rx + wcode + 1.5 * mm, ry2, f"… {ex['means']}")
+        c.setFont(JP, 7.5)
+        c.setFillColor(black)
+        rx += wcode + pdfmetrics.stringWidth(f"… {ex['means']}", JP, 7) + 8 * mm
+        if i == 1 and rx > right - 60 * mm:
+            rx = left + 16 * mm
+            ry2 -= 4.2 * mm
 
 
 def draw_grid(c: canvas.Canvas) -> None:
@@ -434,9 +459,9 @@ def draw_example(c: canvas.Canvas, x0: float, y_top: float) -> float:
     # 10:00〜10:45 田中 C2（35 分）
     box(0, 2)
     write(0, "10:00", "田中", "C2")
-    # 10:45〜11:45 佐藤① C1+眉（55 分）。前の予約と線を共有する
+    # 10:45〜11:45 佐藤① C1+M（55 分）。前の予約と線を共有する
     box(3, 6)
-    write(3, "10:45", "佐藤①", "C1+眉")
+    write(3, "10:45", "佐藤①", "C1+M")
 
     # 説明
     c.setFont(JP, 7.8)
@@ -473,7 +498,10 @@ def draw_page2(c: canvas.Canvas) -> None:
         "2. 予約が入ったら、その時間帯の上と下の破線をペンでなぞって、四角で囲みます。",
         "   四角の上の線が開始、下の線が終了の時刻です（1 行 = 15 分）。",
         "3. 四角の中の最初の行に、「開始」「名前」「コース」を書きます。欄からはみ出さないように。",
-        "4. 名前は姓だけで構いません。メニューは 1 ページ目の記号で書きます（例 C2+剃）。",
+        "4. 名前は姓だけで構いません。メニューは 1 ページ目の記号で書きます。",
+        "   コース記号を先に書き、オプションを付ける場合だけ「+記号」を続けます。",
+        "     C2 … カット・シャンプー のみ　／　C2+S … カット・シャンプー ＋ お顔剃り",
+        "     K1+H+E … カラー ＋ 頭皮スパ ＋ 耳洗い（オプションが 2 つ以上なら + でつなぐ）",
         "5. 取り消しは、四角の中に大きく × を書いてください。塗りつぶさないでください。",
         "6. 新規のお客様は名前の横に ① ② … を付け、下の「お客様メモ」に電話番号を書きます。",
         "7. 1 週間分書けたら、1 ページ目（と、書いた場合はこのページ）を真上から写真に撮り、",

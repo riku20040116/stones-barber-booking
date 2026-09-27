@@ -549,11 +549,14 @@ function RowCard({
           </div>
           <div className="space-y-1">
             <Label className="text-xs">メニュー記号</Label>
-            <Input value={row.courseText} onChange={(e) => onChange({ courseText: e.target.value })} placeholder="C2+剃" />
+            <Input value={row.courseText} onChange={(e) => onChange({ courseText: e.target.value })} placeholder="C2+S" />
             <p className="text-[11px] text-zinc-500">
               {parsed.codes.length > 0 ? `→ ${parsed.codes.join(" / ")}` : "記号が読めません"}
               {parsed.unknown.length > 0 && (
                 <span className="text-red-600">（不明: {parsed.unknown.join(" ")}）</span>
+              )}
+              {parsed.ambiguous.length > 0 && (
+                <span className="text-amber-700">（区切りが不明: {parsed.ambiguous.join(" ")}）</span>
               )}
             </p>
           </div>

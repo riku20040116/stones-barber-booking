@@ -14,7 +14,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod/v4";
 
-import { ALL_CODE_STRINGS, MAIN_CODES, OPTION_CODES } from "./menu-codes";
+import { ALL_CODE_STRINGS, CODE_RULE, MAIN_CODES, OPTION_CODES } from "./menu-codes";
 
 const MODEL = "claude-opus-5";
 
@@ -100,8 +100,15 @@ export type ExtractedBooking = z.infer<typeof BookingSchema>;
 function buildSystemPrompt(): string {
   const legend = [
     ...MAIN_CODES.map((c) => `${c.code} = ${c.label}`),
-    ...OPTION_CODES.map((c) => `${c.code} = ${c.label}（オプション）`),
+    ...OPTION_CODES.map(
+      (c) =>
+        `${c.code} = ${c.label}（オプション）` +
+        (c.aliases?.length ? `　※古い用紙では「+${c.aliases.join("」「+")}」と書かれていることがあります` : ""),
+    ),
   ].join("\n");
+  const examples = CODE_RULE.examples
+    .map((e) => `  ${e.write} → ${e.means}`)
+    .join("\n");
 
   return `あなたは理容室 STONE'S BARBER の手書き予約表を読み取り、予約の一覧に書き起こす係です。
 読み取った結果は、店のスタッフが画面で確認してから予約システムに登録します。
@@ -126,7 +133,14 @@ function buildSystemPrompt(): string {
 
 ## メニュー記号の凡例
 ${legend}
-記号は組み合わせて書かれます（例: C2+剃 は カット・シャンプー と お顔剃り）。
+
+## メニューの書き方のきまり
+${CODE_RULE.text}。
+${examples}
+- コース記号（C1〜T1）は必ず 1 つ書かれ、先頭に来ます。
+- オプションが無いときは「+」以降は書かれません。
+- オプションが 2 つ以上のときは「+」でつなげます（例: C1+H+E）。
+- 「+」を書き忘れて続けて書かれていることもあります（例: C2S）。その場合も C2 と +S に分けて読んでください。
 
 ## 2ページ目（写っている場合）
 「お客様メモ」の表に No.（①②…）・お名前・お電話番号・メニュー・備考 が書かれています。書かれている行だけを contacts に入れてください。

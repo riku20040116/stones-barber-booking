@@ -67,6 +67,8 @@ export type DraftRow = {
   courseText: string;
   codes: string[];
   unknownCodes: string[];
+  /** 「+」区切りが無く、切り分け方が一通りに決まらない部分（例 "SFS"） */
+  ambiguousCodes: string[];
   memoNo: number | null;
   /** 2ページ目のお客様メモから拾った電話番号 */
   memoPhone: string;

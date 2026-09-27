@@ -20,7 +20,7 @@ import { fetchHolidayOverridesInRange } from "@/lib/reservation/queries";
 import { formatDateJst, formatTimeJst, jstWallToUtc } from "@/lib/timezone";
 
 import type { SheetExtraction } from "./extract";
-import { findCode, parseCourseText } from "./menu-codes";
+import { findCode, normalizeCode, parseCourseText } from "./menu-codes";
 import {
   SHEET_COLUMNS,
   type Confidence,
@@ -397,6 +397,12 @@ function computeWarnings(
   if (row.unknownCodes.length > 0) {
     w.push(`凡例にない記号があります: ${row.unknownCodes.join(" ")}`);
   }
+  if (row.ambiguousCodes.length > 0) {
+    w.push(
+      `「${row.ambiguousCodes.join(" ")}」は区切りが無く、記号の切り分け方が一通りに決まりません。`
+      + `「+」で区切った形に直してください（例 C2+SF+S）`,
+    );
+  }
   if (row.start && row.end && row.menuDuration > 0) {
     const boxMin = toMin(row.end) - toMin(row.start);
     if (boxMin < row.menuDuration) {
@@ -483,8 +489,8 @@ export async function buildDraftRows(
       // AI が記号に直したものと、手書きの文字列を解釈し直したものを合わせる
       const fromText = parseCourseText(b.course_text);
       const aiCodes = b.course_codes
-        .map((c) => c.normalize("NFKC").trim().toUpperCase().replace(/^＋/, "+"))
-        .filter((c) => findCode(c));
+        .map((c) => normalizeCode(c))
+        .filter((c): c is string => c !== null);
       const codes = [...new Set([...aiCodes, ...fromText.codes])];
 
       const menus = menusForCodes(codes, bySlug);
@@ -507,6 +513,7 @@ export async function buildDraftRows(
         courseText: b.course_text.trim(),
         codes,
         unknownCodes: fromText.unknown,
+        ambiguousCodes: fromText.ambiguous,
         memoNo: b.memo_no,
         memoPhone,
         confidence: normalizeConfidence(b.confidence),
@@ -545,6 +552,7 @@ export async function recheckRows(input: DraftRow[]): Promise<DraftRow[]> {
     const parsed = parseCourseText(row.courseText);
     row.codes = parsed.codes;
     row.unknownCodes = parsed.unknown;
+    row.ambiguousCodes = parsed.ambiguous;
     row.candidates = findCandidates(row.name, row.memoPhone, customers);
     // 選んでいた既存顧客が候補から外れても、選択は尊重する（名前を直しただけのことが多い）
     if (row.customer.mode === "new") {

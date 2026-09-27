@@ -45,8 +45,8 @@
           "box_end": "10:45",
           "written_start": "10:15",
           "name": "鈴木",
-          "course_text": "C2+剃",
-          "course_codes": ["C2", "+剃"],
+          "course_text": "C2+S",
+          "course_codes": ["C2", "+S"],
           "memo_no": null,
           "confidence": "medium",
           "remarks": "開始欄は 10:15 と読めるが、四角の上辺は 10:00 の線"
@@ -75,11 +75,11 @@
           "box_end": "17:00",
           "written_start": "16:00",
           "name": "伊藤",
-          "course_text": "C9+頭",
-          "course_codes": ["+頭"],
+          "course_text": "C9+SFS",
+          "course_codes": [],
           "memo_no": null,
           "confidence": "low",
-          "remarks": "メニュー記号の数字が読みにくい"
+          "remarks": "メニュー記号が読みにくく、区切りも見えない"
         }
       ]
     }
