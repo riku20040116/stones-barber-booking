@@ -147,7 +147,7 @@ AI が予約の範囲を取り違える。1 時間ごとの目印は、線では
 
 | 環境変数 | 内容 |
 | --- | --- |
-| `ANTHROPIC_API_KEY` | 必須。https://console.anthropic.com で発行 |
+| `ANTHROPIC_API_KEY` | 必須。https://platform.claude.com/settings/keys で発行 |
 | `SHEET_EXTRACT_EFFORT` | 任意。既定 `high`。遅すぎる場合だけ `medium` |
 
 Vercel の Environment Variables にも同じものを入れて Redeploy する。
