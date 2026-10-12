@@ -1,30 +1,28 @@
 "use client";
 /**
- * 手書き予約表の取り込み画面。
+ * 手書き予約表の取り込み画面（貼り付け）。
  *
- *   写真を選ぶ → 読み取る → 1 件ずつ確認・修正 → 登録
+ *   ① 予約表を撮影 → ② Google レンズで文字をコピー → ③「貼り付け」→ ④「読み込む」
+ *   → 一覧で確認・修正（直すたびにその場で判定し直す）→ チェックした行を「登録する」
  *
- * すでにシステムに入っている予約と時間が重なる行があると、ポップアップで知らせ、
- * 「変更対象（手書き / システム）」と「変更内容（登録しない・キャンセル・日時変更）」
- * を入力してもらう。
+ * 判定（OK・要確認・エラー）は lib/paste-import/judge.ts。サーバーも登録の直前に同じ判定をする。
  */
 import * as React from "react";
 import Link from "next/link";
 import {
   AlertTriangleIcon,
   CheckCircle2Icon,
-  ImageIcon,
+  ClipboardPasteIcon,
   Loader2Icon,
-  RefreshCwIcon,
+  PlusIcon,
+  RotateCcwIcon,
+  Trash2Icon,
   XCircleIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -33,992 +31,713 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { NoticeDialog, type Notice } from "@/components/ui/notice-dialog";
 import { cn } from "@/lib/utils";
-import { parseCourseText } from "@/lib/sheet/menu-codes";
+import type { HolidayOverride } from "@/lib/calendar";
+import { formatDateJst, formatTimeJst } from "@/lib/timezone";
+import { blankRow, fromMinutes, menuMinutes, syncEnd } from "@/lib/paste-import/draft";
+import { judgeRows, withJudgement } from "@/lib/paste-import/judge";
+import { makeDayHours } from "@/lib/paste-import/hours";
 import type {
-  CommitRowResult,
-  ConflictInfo,
   DraftRow,
-  Resolution,
-  SheetMeta,
-} from "@/lib/sheet/types";
-import { commitImportAction, readSheetAction, recheckAction } from "./actions";
+  ExistingReservation,
+  Judged,
+  JudgeStatus,
+  MenuEntry,
+} from "@/lib/paste-import/types";
+import { analyzePasteAction, commitPasteAction, refreshJudgeDataAction } from "./actions";
 
 // -----------------------------------------------------------------------------
-// 写真の縮小（長辺 2576px の JPEG にする）
-//   読み取りモデルが扱える最大の解像度。これより大きくても精度は上がらず、
-//   送信が重くなるだけなので端末側で縮める。
+// 表示の部品
 // -----------------------------------------------------------------------------
-const MAX_EDGE = 2576;
 
-async function fileToJpeg(
-  file: File,
-): Promise<{ mediaType: "image/jpeg"; data: string }> {
-  let bitmap: ImageBitmap;
-  try {
-    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
-  } catch {
-    throw new Error(
-      "写真を読み込めませんでした。iPhone の場合は「設定 → カメラ → フォーマット → 互換性優先」にしてから撮影してください。",
-    );
-  }
-  const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height));
-  const w = Math.round(bitmap.width * scale);
-  const h = Math.round(bitmap.height * scale);
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("写真の変換に失敗しました。");
-  ctx.drawImage(bitmap, 0, 0, w, h);
-  bitmap.close();
-
-  const blob = await new Promise<Blob>((resolve, reject) =>
-    canvas.toBlob(
-      (b) => (b ? resolve(b) : reject(new Error("写真の変換に失敗しました。"))),
-      "image/jpeg",
-      0.9,
-    ),
-  );
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error("写真の読み込みに失敗しました。"));
-    reader.readAsDataURL(blob);
-  });
-  return { mediaType: "image/jpeg", data: dataUrl.slice(dataUrl.indexOf(",") + 1) };
-}
-
-// -----------------------------------------------------------------------------
-// 表示用の小物
-// -----------------------------------------------------------------------------
 const DOW = ["日", "月", "火", "水", "木", "金", "土"];
 
-function dateLabel(date: string): string {
-  if (!date) return "日付未定";
-  const d = new Date(`${date}T12:00:00+09:00`);
-  return `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}（${DOW[d.getDay()]}）`;
+/** "2026-10-20" → "2026年10月20日（火）" */
+function dateLabel(d: string, withYear = true): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return "日付なし";
+  const [y, m, day] = d.split("-").map(Number) as [number, number, number];
+  const dow = DOW[new Date(Date.UTC(y, m - 1, day)).getUTCDay()];
+  return `${withYear ? `${y}年` : ""}${m}月${day}日（${dow}）`;
 }
 
-function sourceLabel(source: string | null): string {
-  switch (source) {
-    case "web":
-      return "Web予約";
-    case "phone":
-      return "電話";
-    case "walkin":
-      return "来店";
-    case "handwritten":
-      return "手書き";
-    default:
-      return "";
-  }
+/** "09:30" → "9:30" */
+function t(s: string): string {
+  return s ? s.replace(/^0(\d)/, "$1") : "--:--";
 }
 
-function hasUnresolved(rows: DraftRow[]): boolean {
-  return rows.some((r) => r.include && r.conflicts.length > 0 && !r.resolution);
+/** 8:00〜21:00 の 15 分おき（今の値が 15 分おきでなければ、それも入れる） */
+const TIME_STEPS = Array.from({ length: (21 - 8) * 4 + 1 }, (_, i) => fromMinutes(8 * 60 + i * 15));
+function timeOptions(current: string): string[] {
+  return current && !TIME_STEPS.includes(current) ? [...TIME_STEPS, current].sort() : TIME_STEPS;
 }
 
-function resolutionLabel(r: Resolution, row: DraftRow): string {
-  if (r.target === "sheet") {
-    return r.action === "skip"
-      ? "手書きの予約は登録しない"
-      : `手書きの予約を ${dateLabel(r.date)} ${r.start} に変更して登録`;
-  }
-  const c = row.conflicts.find((x) => x.reservationId === r.reservationId);
-  const who = c ? `${c.reservationCode}（${c.name} 様）` : "システムの予約";
-  return r.action === "cancel"
-    ? `${who} をキャンセルして、手書きの予約を登録`
-    : `${who} を ${dateLabel(r.date)} ${r.start} に移動して、手書きの予約を登録`;
-}
-
-// =============================================================================
-// 本体
-// =============================================================================
-/** 取り込む写真 1 枚。sheet = 予約表（1 ページ目）、memo = 2 ページ目（お客様メモ） */
-type PickedPhoto = { file: File; kind: "sheet" | "memo" };
-
-export function ImportFlow({
-  configured,
-  sendsMemo,
-}: {
-  configured: boolean;
-  /** 2 ページ目（電話番号入り）を読み取りに送れるか。無料版では送らない。 */
-  sendsMemo: boolean;
-}) {
-  const [phase, setPhase] = React.useState<"upload" | "review" | "done">("upload");
-  const [rows, setRows] = React.useState<DraftRow[]>([]);
-  const [meta, setMeta] = React.useState<SheetMeta | null>(null);
-  const [results, setResults] = React.useState<CommitRowResult[]>([]);
-  const [dirty, setDirty] = React.useState(false);
-  const [dialog, setDialog] = React.useState<null | "notice" | "commit">(null);
-  const [pending, startTransition] = React.useTransition();
-
-  function updateRow(key: string, patch: Partial<DraftRow>) {
-    setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
-    setDirty(true);
-  }
-
-  function handleRead(images: PickedPhoto[], fallbackWeekStart: string) {
-    startTransition(async () => {
-      let payload;
-      try {
-        payload = await Promise.all(
-          images.map(async (p) => ({ kind: p.kind, ...(await fileToJpeg(p.file)) })),
-        );
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : "写真の準備に失敗しました");
-        return;
-      }
-      const res = await readSheetAction({
-        images: payload,
-        fallbackWeekStart: fallbackWeekStart || null,
-      });
-      if (!res.ok) {
-        toast.error(res.error);
-        return;
-      }
-      setRows(res.rows);
-      setMeta(res.meta);
-      setDirty(false);
-      setPhase("review");
-      if (res.rows.length === 0) {
-        toast.warning("予約が 1 件も読み取れませんでした。写真をご確認ください。");
-      } else {
-        toast.success(`${res.rows.length} 件の予約を読み取りました。内容を確認してください。`);
-      }
-      // すでに入っている予約と重なる行があれば、すぐに知らせる
-      if (hasUnresolved(res.rows)) setDialog("notice");
-    });
-  }
-
-  function handleRecheck() {
-    startTransition(async () => {
-      const res = await recheckAction(rows);
-      if (!res.ok) {
-        toast.error(res.error);
-        return;
-      }
-      setRows(res.rows);
-      setDirty(false);
-      if (hasUnresolved(res.rows)) setDialog("notice");
-      else toast.success("確認しました。");
-    });
-  }
-
-  function handleCommit(current: DraftRow[] = rows) {
-    startTransition(async () => {
-      const res = await commitImportAction(current);
-      if (res.ok) {
-        setResults(res.results);
-        setPhase("done");
-        const ok = res.results.filter((r) => r.ok && r.reservationCode).length;
-        toast.success(`${ok} 件の予約を登録しました。`);
-        return;
-      }
-      if (res.needsResolution) {
-        setRows(res.rows);
-        setDirty(false);
-        setDialog("commit");
-        return;
-      }
-      toast.error(res.error);
-    });
-  }
-
-  function applyResolutions(map: Map<string, Resolution | null>, thenCommit: boolean) {
-    const next = rows.map((r) =>
-      map.has(r.key) ? { ...r, resolution: map.get(r.key) ?? null } : r,
-    );
-    setRows(next);
-    setDialog(null);
-    if (thenCommit) handleCommit(next);
-  }
-
-  if (phase === "upload") {
-    return (
-      <UploadPanel
-        configured={configured}
-        sendsMemo={sendsMemo}
-        pending={pending}
-        onRead={handleRead}
-      />
-    );
-  }
-
-  if (phase === "done") {
-    return (
-      <ResultsPanel
-        rows={rows}
-        results={results}
-        onRestart={() => {
-          setRows([]);
-          setResults([]);
-          setMeta(null);
-          setPhase("upload");
-        }}
-      />
-    );
-  }
-
-  const included = rows.filter((r) => r.include);
-  const conflictRows = included.filter((r) => r.conflicts.length > 0);
-  const warnRows = included.filter((r) => r.warnings.length > 0);
-
-  return (
-    <div className="space-y-4">
-      {meta && (meta.sheetWarnings.length > 0 || meta.weekStart) && (
-        <Card>
-          <CardContent className="space-y-2 py-1 text-sm">
-            {meta.weekStart && (
-              <p>
-                この週の火曜日: <strong>{dateLabel(meta.weekStart)}</strong>
-              </p>
-            )}
-            {meta.sheetWarnings.map((w, i) => (
-              <p key={i} className="flex items-start gap-1.5 text-amber-700">
-                <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" />
-                {w}
-              </p>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* 上部の操作バー */}
-      <div className="sticky top-14 z-10 -mx-4 flex flex-wrap items-center gap-2 border-b border-zinc-200 bg-zinc-100/95 px-4 py-2 backdrop-blur md:top-0">
-        <p className="mr-auto text-sm text-zinc-700">
-          {included.length} 件を登録予定
-          {conflictRows.length > 0 && (
-            <span className="ml-2 font-semibold text-red-700">重複 {conflictRows.length} 件</span>
-          )}
-          {warnRows.length > 0 && (
-            <span className="ml-2 text-amber-700">要確認 {warnRows.length} 件</span>
-          )}
-        </p>
-        {conflictRows.length > 0 && (
-          <Button variant="outline" size="sm" onClick={() => setDialog("notice")} disabled={pending}>
-            <AlertTriangleIcon /> 重複を解決する
-          </Button>
-        )}
-        <Button variant="outline" size="sm" onClick={handleRecheck} disabled={pending}>
-          <RefreshCwIcon /> {dirty ? "直した内容をチェック" : "もう一度チェック"}
-        </Button>
-        <Button size="sm" className="font-bold" onClick={() => handleCommit()} disabled={pending || included.length === 0}>
-          {pending ? <Loader2Icon className="animate-spin" /> : <CheckCircle2Icon />}
-          登録する
-        </Button>
-      </div>
-
-      {rows.length === 0 ? (
-        <Card>
-          <CardContent className="py-6 text-center text-sm text-zinc-600">
-            予約が読み取れませんでした。
-            <Button variant="link" onClick={() => setPhase("upload")}>
-              写真を選び直す
-            </Button>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-3">
-          {rows.map((row) => (
-            <RowCard
-              key={row.key}
-              row={row}
-              onChange={(patch) => updateRow(row.key, patch)}
-              onOpenResolve={() => setDialog("notice")}
-            />
-          ))}
-        </div>
-      )}
-
-      <ConflictDialog
-        open={dialog !== null}
-        mode={dialog ?? "notice"}
-        rows={rows}
-        pending={pending}
-        onClose={() => setDialog(null)}
-        onApply={applyResolutions}
-      />
-    </div>
-  );
-}
-
-// =============================================================================
-// 1) 写真を選ぶ
-// =============================================================================
-function UploadPanel({
-  configured,
-  sendsMemo,
-  pending,
-  onRead,
-}: {
-  configured: boolean;
-  sendsMemo: boolean;
-  pending: boolean;
-  onRead: (images: PickedPhoto[], fallbackWeekStart: string) => void;
-}) {
-  const [sheet, setSheet] = React.useState<File | null>(null);
-  const [memo, setMemo] = React.useState<File | null>(null);
-  const [weekStart, setWeekStart] = React.useState("");
-  const photos: PickedPhoto[] = [
-    sheet && { file: sheet, kind: "sheet" as const },
-    sendsMemo && memo && { file: memo, kind: "memo" as const },
-  ].filter((p): p is PickedPhoto => Boolean(p));
-  const hasSheet = sheet !== null;
-
-  return (
-    <Card>
-      <CardContent className="space-y-5 py-2">
-        <div className={cn("grid gap-4", sendsMemo && "md:grid-cols-2")}>
-          <PhotoPicker
-            id="sheet"
-            label="予約表（1 ページ目・火〜日）"
-            required
-            file={sheet}
-            onChange={setSheet}
-          />
-          {sendsMemo && (
-            <PhotoPicker
-              id="memo"
-              label="お客様メモ（2 ページ目・任意）"
-              hint="新規のお客様の電話番号を書いたときだけ撮ってください"
-              file={memo}
-              onChange={setMemo}
-            />
-          )}
-        </div>
-        {!sendsMemo && configured && (
-          <p className="rounded-md bg-sky-50 p-3 text-xs leading-relaxed text-sky-900">
-            無料版の読み取りでは、個人情報保護のため 2 ページ目（お客様メモ・電話番号）は送りません。
-            新規のお客様の電話番号は、読み取り後の確認画面で入力してください。
-          </p>
-        )}
-
-        <div className="space-y-1.5">
-          <Label htmlFor="weekStart">この週の火曜日</Label>
-          <Input
-            id="weekStart"
-            type="date"
-            value={weekStart}
-            onChange={(e) => setWeekStart(e.target.value)}
-            className="max-w-48"
-          />
-          <p className="text-xs text-zinc-500">
-            用紙に書いた日付が読み取れなかったときに使います。空欄でも構いません。
-          </p>
-        </div>
-
-        <div className="rounded-md bg-zinc-50 p-3 text-xs leading-relaxed text-zinc-600">
-          <p className="font-semibold text-zinc-700">うまく読み取るコツ</p>
-          <ul className="mt-1 list-disc space-y-0.5 pl-4">
-            <li>用紙の四隅の黒い四角が全部写るように、真上から撮ってください。</li>
-            <li>明るい場所で、影や反射が入らないようにしてください。</li>
-            <li>予約表は横向きの用紙です。スマホも横向きにして、用紙全体をできるだけ大きく撮ってください（1 行が細いため）。</li>
-            <li>読み取りには 1〜2 分かかることがあります。画面を閉じずにお待ちください。</li>
-            <li>登録が終わったら、用紙の「取り込み日」に今日の日付を書いてください。</li>
-          </ul>
-        </div>
-
-        <Button
-          size="lg"
-          className="h-12 w-full font-bold sm:w-auto"
-          disabled={!configured || !hasSheet || pending}
-          onClick={() => hasSheet && onRead(photos, weekStart)}
-        >
-          {pending ? (
-            <>
-              <Loader2Icon className="animate-spin" /> 読み取り中…（1〜2分）
-            </>
-          ) : (
-            "写真を読み取る"
-          )}
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-function PhotoPicker({
-  id,
-  label,
-  hint,
-  required,
-  file,
-  onChange,
-}: {
-  id: string;
-  label: string;
-  hint?: string;
-  required?: boolean;
-  file: File | null;
-  onChange: (f: File | null) => void;
-}) {
-  // プレビュー用の一時 URL。ファイルが変わるか画面を離れたら解放する。
-  const preview = React.useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
-  React.useEffect(() => {
-    return () => {
-      if (preview) URL.revokeObjectURL(preview);
-    };
-  }, [preview]);
-
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id}>
-        {label}
-        {required && <span className="ml-1 text-red-600">*</span>}
-      </Label>
-      <label
-        htmlFor={id}
-        className="flex h-44 cursor-pointer items-center justify-center overflow-hidden rounded-md border-2 border-dashed border-zinc-300 bg-white text-sm text-zinc-500 hover:border-zinc-400"
-      >
-        {file && preview ? (
-          // eslint-disable-next-line @next/next/no-img-element -- 選んだ写真のプレビュー（ローカルの blob URL）
-          <img src={preview} alt={label} className="h-full w-full object-contain" />
-        ) : (
-          <span className="flex flex-col items-center gap-1">
-            <ImageIcon className="size-6" />
-            写真を選ぶ・撮る
-          </span>
-        )}
-      </label>
-      <input
-        id={id}
-        type="file"
-        accept="image/*"
-        className="sr-only"
-        onChange={(e) => onChange(e.target.files?.[0] ?? null)}
-      />
-      {hint && <p className="text-xs text-zinc-500">{hint}</p>}
-      {file && (
-        <button
-          type="button"
-          className="text-xs text-zinc-500 underline"
-          onClick={() => onChange(null)}
-        >
-          選び直す
-        </button>
-      )}
-    </div>
-  );
-}
-
-// =============================================================================
-// 2) 1 件ずつの確認
-// =============================================================================
-function RowCard({
-  row,
-  onChange,
-  onOpenResolve,
-}: {
-  row: DraftRow;
-  onChange: (patch: Partial<DraftRow>) => void;
-  onOpenResolve: () => void;
-}) {
-  const parsed = parseCourseText(row.courseText);
-  const selectedCandidate =
-    row.customer.mode === "existing"
-      ? row.candidates.find((c) => c.id === (row.customer as { id: string }).id)
-      : undefined;
-  const customerValue =
-    row.customer.mode === "existing" ? row.customer.id : row.customer.mode === "new" ? "__new" : "";
-
-  return (
-    <Card
-      className={cn(
-        !row.include && "opacity-50",
-        row.include && row.conflicts.length > 0 && !row.resolution && "ring-2 ring-red-400",
-      )}
-    >
-      <CardContent className="space-y-3 py-1">
-        {/* 見出し */}
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-2 text-sm font-medium">
-            <input
-              type="checkbox"
-              className="size-4"
-              checked={row.include}
-              onChange={(e) => onChange({ include: e.target.checked })}
-            />
-            登録する
-          </label>
-          <Badge variant="outline">列 {row.column}</Badge>
-          {row.crossedOut && <Badge variant="destructive">✖ 取り消し</Badge>}
-          <span className="text-sm font-semibold">
-            {dateLabel(row.date)} {row.start}〜{row.end}
-          </span>
-          <span className="text-sm text-zinc-600">
-            手書き: 「{row.name}
-            {row.memoNo != null && `（${row.memoNo}）`} {row.courseText}」
-          </span>
-          {row.memoPhone && (
-            <Badge variant="secondary">メモの電話番号 {row.memoPhone}</Badge>
-          )}
-          {row.confidence !== "high" && (
-            <Badge variant={row.confidence === "low" ? "destructive" : "secondary"}>
-              自信{row.confidence === "low" ? "低" : "中"}
-            </Badge>
-          )}
-          <span className="ml-auto text-sm tabular-nums text-zinc-700">
-            {row.totalPrice.toLocaleString()}円 / {row.menuDuration}分
-          </span>
-        </div>
-
-        {/* 編集欄 */}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="space-y-1">
-            <Label className="text-xs">日付</Label>
-            <Input type="date" value={row.date} onChange={(e) => onChange({ date: e.target.value })} />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label className="text-xs">開始</Label>
-              <Input type="time" step={900} value={row.start} onChange={(e) => onChange({ start: e.target.value })} />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">終了</Label>
-              <Input type="time" step={900} value={row.end} onChange={(e) => onChange({ end: e.target.value })} />
-            </div>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">名前（手書き）</Label>
-            <Input value={row.name} onChange={(e) => onChange({ name: e.target.value })} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">メニュー記号</Label>
-            <Input value={row.courseText} onChange={(e) => onChange({ courseText: e.target.value })} placeholder="C2+S" />
-            <p className="text-[11px] text-zinc-500">
-              {parsed.codes.length > 0 ? `→ ${parsed.codes.join(" / ")}` : "記号が読めません"}
-              {parsed.unknown.length > 0 && (
-                <span className="text-red-600">（不明: {parsed.unknown.join(" ")}）</span>
-              )}
-              {parsed.ambiguous.length > 0 && (
-                <span className="text-amber-700">（区切りが不明: {parsed.ambiguous.join(" ")}）</span>
-              )}
-            </p>
-          </div>
-        </div>
-
-        {/* お客様 */}
-        <div className="grid gap-3 rounded-md bg-zinc-50 p-3 sm:grid-cols-[1fr_auto]">
-          <div className="space-y-1">
-            <Label className="text-xs">お客様（顧客リストから選ぶ）</Label>
-            <select
-              className={cn(
-                "h-9 w-full rounded-md border bg-white px-2 text-sm",
-                row.customer.mode === "unset" ? "border-red-400" : "border-zinc-300",
-              )}
-              value={customerValue}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === "__new") {
-                  onChange({ customer: { mode: "new", name: row.name, phone: row.memoPhone } });
-                } else if (v) {
-                  onChange({ customer: { mode: "existing", id: v } });
-                } else {
-                  onChange({ customer: { mode: "unset" } });
-                }
-              }}
-            >
-              <option value="">— 選んでください —</option>
-              {row.candidates.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}（{c.reason}）{c.phone ? ` ${c.phone}` : ""}
-                </option>
-              ))}
-              <option value="__new">＋ 新しいお客様として顧客リストに追加</option>
-            </select>
-            {row.candidates.length === 0 && (
-              <p className="text-[11px] text-zinc-500">顧客リストに似た名前の方はいません。</p>
-            )}
-          </div>
-
-          {row.customer.mode === "existing" && selectedCandidate && (
-            <ContactCells phone={selectedCandidate.phone} email={selectedCandidate.email} />
-          )}
-          {row.customer.mode === "new" && (
-            <div className="flex flex-wrap items-end gap-2">
-              <div className="space-y-1">
-                <Label className="text-xs">登録する名前</Label>
-                <Input
-                  className="w-36"
-                  value={row.customer.name}
-                  onChange={(e) =>
-                    onChange({
-                      customer: { mode: "new", name: e.target.value, phone: (row.customer as { phone: string }).phone },
-                    })
-                  }
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">電話番号</Label>
-                <Input
-                  className={cn("w-40", !row.customer.phone && "border-amber-400 bg-amber-50")}
-                  placeholder="不明"
-                  value={row.customer.phone}
-                  onChange={(e) =>
-                    onChange({
-                      customer: { mode: "new", name: (row.customer as { name: string }).name, phone: e.target.value },
-                    })
-                  }
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* 重複 */}
-        {row.conflicts.length > 0 && (
-          <div className="space-y-1 rounded-md border border-red-200 bg-red-50 p-3 text-sm">
-            {row.conflicts.map((c, i) => (
-              <ConflictLine key={i} c={c} />
-            ))}
-            <div className="flex flex-wrap items-center gap-2 pt-1">
-              {row.resolution ? (
-                <span className="text-zinc-800">
-                  <CheckCircle2Icon className="mr-1 inline size-4 text-emerald-600" />
-                  {resolutionLabel(row.resolution, row)}
-                </span>
-              ) : (
-                <span className="font-semibold text-red-700">解決方法が決まっていません</span>
-              )}
-              <Button variant="outline" size="xs" onClick={onOpenResolve}>
-                {row.resolution ? "変更する" : "解決する"}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* 確認してほしいこと */}
-        {(row.warnings.length > 0 || row.aiRemarks) && (
-          <ul className="space-y-0.5 text-xs">
-            {row.warnings.map((w, i) => (
-              <li key={i} className="flex items-start gap-1 text-amber-800">
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                {w}
-              </li>
-            ))}
-            {row.aiRemarks && <li className="text-zinc-500">読み取りメモ: {row.aiRemarks}</li>}
-          </ul>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-/** 顧客の連絡先。空欄は色をつけて「未登録」と出す。 */
-function ContactCells({ phone, email }: { phone: string | null; email: string | null }) {
-  return (
-    <div className="flex flex-wrap items-end gap-2 text-sm">
-      <span className={cn("rounded px-2 py-1", phone ? "bg-white" : "bg-amber-100 text-amber-900")}>
-        電話: {phone || "未登録"}
-      </span>
-      <span className={cn("rounded px-2 py-1", email ? "bg-white" : "bg-amber-100 text-amber-900")}>
-        メール: {email || "未登録"}
-      </span>
-    </div>
-  );
-}
-
-function ConflictLine({ c }: { c: ConflictInfo }) {
-  return (
-    <p className="flex flex-wrap items-center gap-1.5 text-red-900">
-      <AlertTriangleIcon className="size-4" />
-      {c.kind === "system" ? (
-        <>
-          システムの予約 <strong>{c.reservationCode}</strong> {c.name} 様 {c.start}〜{c.end}
-          {c.source && <Badge variant="outline">{sourceLabel(c.source)}</Badge>}
-        </>
-      ) : (
-        <>
-          この写真の別の行（{c.name} 様 {c.start}〜{c.end}）と重なっています
-        </>
-      )}
-      {c.likelySame && <Badge variant="secondary">同じ予約の可能性大</Badge>}
-    </p>
-  );
-}
-
-// =============================================================================
-// 3) 重複の解決（ポップアップ）
-// =============================================================================
-type Draft = {
-  target: "sheet" | "system";
-  action: "skip" | "cancel" | "move";
-  date: string;
-  start: string;
+const STATUS_STYLE: Record<JudgeStatus, { label: string; badge: string; card: string; Icon: typeof CheckCircle2Icon }> = {
+  ok: { label: "OK", badge: "bg-emerald-600 text-white", card: "border-emerald-300", Icon: CheckCircle2Icon },
+  check: { label: "要確認", badge: "bg-amber-500 text-white", card: "border-amber-400 bg-amber-50/40", Icon: AlertTriangleIcon },
+  error: { label: "エラー", badge: "bg-red-600 text-white", card: "border-red-400 bg-red-50/40", Icon: XCircleIcon },
 };
 
-function initialDraft(row: DraftRow): Draft {
-  const r = row.resolution;
-  if (r) {
-    return {
-      target: r.target,
-      action: r.action,
-      date: r.action === "move" ? r.date : row.date,
-      start: r.action === "move" ? r.start : row.start,
-    };
-  }
-  // 同じ予約の可能性が高ければ「手書き分を登録しない」を初期値にする
-  const likelySame = row.conflicts.some((c) => c.likelySame);
-  return { target: "sheet", action: likelySame ? "skip" : "move", date: row.date, start: row.start };
+const fieldClass =
+  "h-12 w-full rounded-md border border-zinc-300 bg-white px-3 text-base text-zinc-900 focus:border-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/20";
+
+// -----------------------------------------------------------------------------
+// 画面
+// -----------------------------------------------------------------------------
+
+type Data = {
+  menus: MenuEntry[];
+  existing: ExistingReservation[];
+  overrides: HolidayOverride[];
+};
+
+type View = { rows: DraftRow[]; judged: Judged[] };
+
+function judge(rows: DraftRow[], data: Data): View {
+  const now = new Date();
+  const judged = judgeRows(rows, {
+    nowDate: formatDateJst(now),
+    nowTime: formatTimeJst(now),
+    dayHours: makeDayHours(data.overrides),
+    existing: data.existing,
+  });
+  return { rows: withJudgement(rows, judged), judged };
 }
 
-/**
- * 入力中の内容を解決方法に変換する。まだ決まっていなければ null（決定ボタンを押せない）。
- * 「日時を変更する」で元と同じ日時のままなら、同じ枠に戻るだけなので未決定とみなす。
- */
-function draftToResolution(d: Draft, row: DraftRow): Resolution | null {
-  if (d.target === "sheet") {
-    if (d.action === "skip") return { target: "sheet", action: "skip" };
-    if (!d.date || !d.start) return null;
-    if (d.date === row.date && d.start === row.start) return null;
-    return { target: "sheet", action: "move", date: d.date, start: d.start };
-  }
-  const sys = row.conflicts.find((c) => c.kind === "system");
-  if (!sys?.reservationId) return null;
-  if (d.action === "cancel") return { target: "system", action: "cancel", reservationId: sys.reservationId };
-  if (!d.date || !d.start) return null;
-  if (d.date === sys.date && d.start === sys.start) return null;
-  return { target: "system", action: "move", reservationId: sys.reservationId, date: d.date, start: d.start };
-}
+export function ImportFlow({ today }: { today: string }) {
+  const [phase, setPhase] = React.useState<"input" | "review" | "done">("input");
+  const [baseDate, setBaseDate] = React.useState(today);
+  const [text, setText] = React.useState("");
+  const [pasteHelp, setPasteHelp] = React.useState(false);
+  const [busy, setBusy] = React.useState<"" | "analyze" | "commit">("");
+  const [data, setData] = React.useState<Data>({ menus: [], existing: [], overrides: [] });
+  const [view, setView] = React.useState<View>({ rows: [], judged: [] });
+  const [unreadLines, setUnreadLines] = React.useState<string[]>([]);
+  const [ignoredLines, setIgnoredLines] = React.useState<string[]>([]);
+  const [notice, setNotice] = React.useState<Notice | null>(null);
+  const [confirmOpen, setConfirmOpen] = React.useState(false);
+  const [done, setDone] = React.useState<{ count: number; skipped: number } | null>(null);
+  const seq = React.useRef(1);
+  const textRef = React.useRef<HTMLTextAreaElement>(null);
 
-function ConflictDialog({
-  open,
-  mode,
-  rows,
-  pending,
-  onClose,
-  onApply,
-}: {
-  open: boolean;
-  mode: "notice" | "commit";
-  rows: DraftRow[];
-  pending: boolean;
-  onClose: () => void;
-  onApply: (map: Map<string, Resolution | null>, thenCommit: boolean) => void;
-}) {
-  const targets = React.useMemo(
-    () => rows.filter((r) => r.include && r.conflicts.length > 0),
-    [rows],
-  );
-  const [drafts, setDrafts] = React.useState<Record<string, Draft>>({});
+  const menuBySlug = React.useMemo(() => new Map(data.menus.map((m) => [m.slug, m])), [data.menus]);
+  const mains = data.menus.filter((m) => !m.isOption);
+  const options = data.menus.filter((m) => m.isOption);
+  const checkedRows = view.rows.filter((r) => r.checked);
 
-  // 開いたときに、その時点の行から入力欄を作り直す
-  const [lastOpen, setLastOpen] = React.useState(false);
-  if (open !== lastOpen) {
-    setLastOpen(open);
-    if (open) {
-      setDrafts(Object.fromEntries(targets.map((r) => [r.key, initialDraft(r)])));
+  // ---- 入力 -----------------------------------------------------------------
+
+  async function pasteFromClipboard() {
+    setPasteHelp(false);
+    try {
+      const clip = await navigator.clipboard.readText();
+      if (!clip.trim()) {
+        setPasteHelp(true);
+        return;
+      }
+      setText((cur) => (cur.trim() ? `${cur.trimEnd()}\n${clip}` : clip));
+      toast.success("貼り付けました");
+    } catch {
+      setPasteHelp(true);
+      textRef.current?.focus();
     }
   }
 
-  const resolutions = new Map(
-    targets.map((r) => [r.key, drafts[r.key] ? draftToResolution(drafts[r.key]!, r) : null]),
-  );
-  const incomplete = [...resolutions.values()].some((v) => v === null);
-
-  function setDraft(key: string, patch: Partial<Draft>) {
-    setDrafts((d) => ({ ...d, [key]: { ...d[key]!, ...patch } }));
+  async function analyze() {
+    if (!text.trim()) {
+      setNotice({ title: "文字がありません", message: "先に「貼り付け」を押して、予約表の文字を入れてください。" });
+      return;
+    }
+    setBusy("analyze");
+    try {
+      const res = await analyzePasteAction({ text, baseDate });
+      if (!res.ok) {
+        setNotice({ title: "読み込めませんでした", message: res.error });
+        return;
+      }
+      const d: Data = { menus: res.menus, existing: res.existing, overrides: res.overrides };
+      setData(d);
+      setView(judge(res.rows, d));
+      setUnreadLines(res.unreadLines);
+      setIgnoredLines(res.ignoredLines);
+      setPhase("review");
+      window.scrollTo({ top: 0 });
+      if (res.rows.length === 0) {
+        setNotice({
+          tone: "info",
+          title: "予約が見つかりませんでした",
+          message: "時刻・お名前・メニューが読み取れませんでした。\n下の「読み取れなかった行」を見て、必要なら「行を足す」で入力してください。",
+        });
+      }
+    } catch {
+      setNotice({ title: "読み込めませんでした", message: "通信できませんでした。電波の良い所で、もう一度お試しください。" });
+    } finally {
+      setBusy("");
+    }
   }
 
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <AlertTriangleIcon className="size-5 text-red-600" />
-            予約が重複しています（{targets.length} 件）
-          </DialogTitle>
-          <DialogDescription>
-            手書きの予約表に、すでにシステムに入っている予約と時間が重なるものがあります。
-            1 件ずつ、どちらを変更するか（変更対象）と、どう変更するか（変更内容）を選んでください。
-          </DialogDescription>
-        </DialogHeader>
+  // ---- 確認・修正 -----------------------------------------------------------
 
-        <div className="space-y-4">
-          {targets.map((row) => {
-            const d = drafts[row.key];
-            if (!d) return null;
-            const systemConflicts = row.conflicts.filter((c) => c.kind === "system");
-            // システム側を動かせるのは、重なっている相手が「システムの予約 1 件だけ」のとき
-            const canTargetSystem =
-              systemConflicts.length === 1 && row.conflicts.every((c) => c.kind === "system");
+  function edit(key: string, patch: Partial<DraftRow>, opts: { syncEnd?: boolean } = {}) {
+    setView((v) =>
+      judge(
+        v.rows.map((r) => {
+          if (r.key !== key) return r;
+          const next = { ...r, ...patch };
+          return opts.syncEnd ? syncEnd(next, data.menus) : next;
+        }),
+        data,
+      ),
+    );
+  }
 
-            return (
-              <div key={row.key} className="space-y-3 rounded-md border border-zinc-200 p-3">
-                <div className="text-sm">
-                  <p className="font-semibold">
-                    手書き: {dateLabel(row.date)} {row.start}〜{row.end}　{row.name} 様　{row.courseText}
-                  </p>
-                  {row.conflicts.map((c, i) => (
-                    <ConflictLine key={i} c={c} />
-                  ))}
-                </div>
+  function toggleChecked(key: string, checked: boolean) {
+    setView((v) => ({ ...v, rows: v.rows.map((r) => (r.key === key ? { ...r, checked } : r)) }));
+  }
 
-                <fieldset className="space-y-1">
-                  <legend className="text-xs font-semibold text-zinc-600">変更対象</legend>
-                  <div className="flex flex-wrap gap-4 text-sm">
-                    <label className="flex items-center gap-1.5">
-                      <input
-                        type="radio"
-                        checked={d.target === "sheet"}
-                        onChange={() =>
-                          setDraft(row.key, { target: "sheet", action: "skip", date: row.date, start: row.start })
-                        }
-                      />
-                      手書きの予約
-                    </label>
-                    <label className={cn("flex items-center gap-1.5", !canTargetSystem && "opacity-40")}>
-                      <input
-                        type="radio"
-                        disabled={!canTargetSystem}
-                        checked={d.target === "system"}
-                        onChange={() => {
-                          const c = systemConflicts[0]!;
-                          setDraft(row.key, { target: "system", action: "move", date: c.date, start: c.start });
-                        }}
-                      />
-                      システムの予約
-                      {systemConflicts[0] && `（${systemConflicts[0].reservationCode}）`}
-                    </label>
-                  </div>
-                  {!canTargetSystem && (
-                    <p className="text-[11px] text-zinc-500">
-                      重なっている予約が複数あるため、手書きの予約側で調整してください。
-                    </p>
-                  )}
-                </fieldset>
+  function removeRow(key: string) {
+    const before = view.rows;
+    setView(judge(before.filter((r) => r.key !== key), data));
+    toast("行を消しました", {
+      action: { label: "元に戻す", onClick: () => setView(judge(before, data)) },
+    });
+  }
 
-                <fieldset className="space-y-1">
-                  <legend className="text-xs font-semibold text-zinc-600">変更内容</legend>
-                  <div className="flex flex-wrap gap-4 text-sm">
-                    {d.target === "sheet" ? (
-                      <label className="flex items-center gap-1.5">
-                        <input type="radio" checked={d.action === "skip"} onChange={() => setDraft(row.key, { action: "skip" })} />
-                        登録しない（同じ予約・書き間違い）
-                      </label>
-                    ) : (
-                      <label className="flex items-center gap-1.5">
-                        <input type="radio" checked={d.action === "cancel"} onChange={() => setDraft(row.key, { action: "cancel" })} />
-                        キャンセルする
-                      </label>
-                    )}
-                    <label className="flex items-center gap-1.5">
-                      <input type="radio" checked={d.action === "move"} onChange={() => setDraft(row.key, { action: "move" })} />
-                      日時を変更する
-                    </label>
-                  </div>
-                  {d.action === "move" && (
-                    <div className="flex flex-wrap items-end gap-2 pt-1">
-                      <div className="space-y-1">
-                        <Label className="text-xs">変更後の日付</Label>
-                        <Input type="date" value={d.date} onChange={(e) => setDraft(row.key, { date: e.target.value })} />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">変更後の開始時刻</Label>
-                        <Input
-                          type="time"
-                          step={900}
-                          value={d.start}
-                          onChange={(e) => setDraft(row.key, { start: e.target.value })}
-                        />
-                      </div>
-                      <p className="pb-2 text-[11px] text-zinc-500">所要時間はそのままです</p>
-                    </div>
-                  )}
-                  {!resolutions.get(row.key) && (
-                    <p className="text-[11px] font-semibold text-red-700">
-                      {d.action === "move" ? "変更後の日時を、今と違う日時にしてください。" : "変更内容を選んでください。"}
-                    </p>
-                  )}
-                  {d.target === "system" && d.action === "cancel" && (
-                    <p className="text-[11px] text-amber-700">
-                      お客様へのキャンセルのご連絡は、お店から直接お願いします（自動メールは送りません）。
-                    </p>
-                  )}
-                </fieldset>
-              </div>
-            );
-          })}
-        </div>
+  function addRow() {
+    const last = view.rows.at(-1);
+    setView(judge([...view.rows, blankRow(last?.date || baseDate, seq.current++)], data));
+  }
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={pending}>
-            あとで決める
+  function restart() {
+    setPhase("input");
+    setView({ rows: [], judged: [] });
+    setUnreadLines([]);
+    setIgnoredLines([]);
+    setDone(null);
+  }
+
+  // ---- 登録 -----------------------------------------------------------------
+
+  async function commit() {
+    setConfirmOpen(false);
+    const targets = view.rows.filter((r) => r.checked);
+    if (targets.length === 0) return;
+    setBusy("commit");
+    try {
+      const res = await commitPasteAction({ rows: targets });
+      if (res.ok) {
+        setDone({ count: res.count, skipped: view.rows.length - targets.length });
+        setPhase("done");
+        window.scrollTo({ top: 0 });
+        return;
+      }
+      // 画面を開いている間に入った予約などで判定が変わったかもしれない → 最新で判定し直す
+      const until = targets.map((r) => r.date).sort().at(-1) ?? baseDate;
+      const fresh = await refreshJudgeDataAction({ until });
+      if (fresh.ok) {
+        const d = { ...data, existing: fresh.existing, overrides: fresh.overrides };
+        setData(d);
+        setView(judge(view.rows, d));
+      }
+      setNotice({ title: "登録できませんでした", message: res.error });
+    } catch {
+      setNotice({
+        title: "登録できたか分かりません",
+        message: "通信が途中で切れました。\n二重に登録しないよう、先に「予約一覧」で登録されたか確かめてください。",
+      });
+    } finally {
+      setBusy("");
+    }
+  }
+
+  // ---- 表示 -----------------------------------------------------------------
+
+  if (phase === "done" && done) {
+    return (
+      <div className="space-y-5 rounded-xl border-2 border-emerald-400 bg-emerald-50 p-5">
+        <p className="flex items-center gap-2 text-xl font-bold text-emerald-800">
+          <CheckCircle2Icon className="size-7" aria-hidden />
+          {done.count} 件の予約を登録しました
+        </p>
+        {done.skipped > 0 && (
+          <p className="text-base text-zinc-700">チェックしなかった {done.skipped} 件は登録していません。</p>
+        )}
+        <p className="text-base text-zinc-700">ネット予約の画面では、この時間は予約できなくなりました。</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Button size="lg" className="h-14 text-base font-bold" render={<Link href="/admin/reservations" />}>
+            予約一覧を見る
           </Button>
           <Button
-            className="font-bold"
-            disabled={incomplete || pending}
-            onClick={() => onApply(resolutions, mode === "commit")}
+            size="lg"
+            variant="outline"
+            className="h-14 text-base"
+            onClick={() => {
+              setText("");
+              restart();
+            }}
           >
-            {pending && <Loader2Icon className="animate-spin" />}
-            {mode === "commit" ? "この内容で登録する" : "この内容で決定"}
+            続けて取り込む
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === "input") {
+    return (
+      <div className="space-y-6">
+        <ol className="space-y-2 rounded-xl border border-zinc-200 bg-white p-4 text-base leading-relaxed">
+          {[
+            "予約表を撮影する",
+            "Google フォトで写真を開き、「レンズ」から文字を選んでコピーする",
+            "この画面に戻って「貼り付け」を押す",
+            "「読み込む」を押す",
+          ].map((s, i) => (
+            <li key={s} className="flex gap-3">
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-sm font-bold text-white">
+                {i + 1}
+              </span>
+              <span className="pt-0.5">{s}</span>
+            </li>
+          ))}
+        </ol>
+
+        <div className="space-y-2">
+          <label htmlFor="base-date" className="block text-base font-bold">
+            この予約表の日付
+          </label>
+          <input
+            id="base-date"
+            type="date"
+            value={baseDate}
+            onChange={(e) => setBaseDate(e.target.value || today)}
+            className={cn(fieldClass, "max-w-xs")}
+          />
+          <p className="text-sm text-zinc-600">日付が書かれていない予約は、この日付になります。</p>
+        </div>
+
+        <div className="space-y-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="lg"
+            className="h-14 w-full border-2 text-lg font-bold"
+            onClick={pasteFromClipboard}
+          >
+            <ClipboardPasteIcon className="size-6" aria-hidden /> 貼り付け
+          </Button>
+          {pasteHelp && (
+            <p className="rounded-md bg-amber-50 p-3 text-base text-amber-900" role="status">
+              「貼り付け」が使えませんでした。下の枠を<strong>長押し</strong>して「貼り付け」を選んでください。
+            </p>
+          )}
+          <Textarea
+            ref={textRef}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={8}
+            placeholder={"ここに予約表の文字が入ります\n例）10:00 山田 C2"}
+            className="min-h-48 text-base"
+            aria-label="予約表の文字"
+          />
+          {text && (
+            <button type="button" className="text-sm text-zinc-500 underline" onClick={() => setText("")}>
+              文字を消す
+            </button>
+          )}
+        </div>
+
+        <Button
+          type="button"
+          size="lg"
+          className="h-14 w-full text-lg font-bold"
+          disabled={busy !== ""}
+          onClick={analyze}
+        >
+          {busy === "analyze" ? <Loader2Icon className="size-6 animate-spin" aria-hidden /> : null}
+          読み込む
+        </Button>
+        <p className="text-sm text-zinc-600">「読み込む」を押しても、まだ登録はされません。次の画面で確かめてから登録します。</p>
+
+        <NoticeDialog notice={notice} onOk={() => setNotice(null)} />
+      </div>
+    );
+  }
+
+  // ---- 確認画面 ----
+  const counts = { ok: 0, check: 0, error: 0 };
+  view.judged.forEach((j) => counts[j.status]++);
+  const perDay = [...view.rows.reduce((m, r) => m.set(r.date, (m.get(r.date) ?? 0) + 1), new Map<string, number>())]
+    .sort(([a], [b]) => a.localeCompare(b));
+
+  return (
+    <div className="space-y-5 pb-28">
+      <section className="space-y-3 rounded-xl border border-zinc-200 bg-white p-4">
+        <p className="text-lg font-bold">読み取った予約：{view.rows.length} 件</p>
+        {perDay.length > 0 && (
+          <ul className="grid grid-cols-2 gap-x-4 gap-y-1 text-base sm:grid-cols-3">
+            {perDay.map(([d, n]) => (
+              <li key={d}>
+                {dateLabel(d, false)}　<strong>{n} 件</strong>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="text-base leading-relaxed text-zinc-700">
+          紙と見比べて、<strong>件数と中身</strong>が合っているか確かめてください。
+          紙で ✖ を付けた（取り消した）予約は、「この行を消す」で消してください。
+        </p>
+        <div className="flex flex-wrap gap-2 text-sm">
+          <span className="rounded-full bg-emerald-600 px-3 py-1 font-bold text-white">OK {counts.ok}</span>
+          <span className="rounded-full bg-amber-500 px-3 py-1 font-bold text-white">要確認 {counts.check}</span>
+          <span className="rounded-full bg-red-600 px-3 py-1 font-bold text-white">エラー {counts.error}</span>
+        </div>
+        <p className="text-sm text-zinc-600">
+          OK はチェック済み。要確認は中身を見てから自分でチェック。エラーは直すまで登録できません。
+        </p>
+        <Button type="button" variant="outline" className="h-11" onClick={restart}>
+          <RotateCcwIcon aria-hidden /> 貼り付けからやり直す
+        </Button>
+      </section>
+
+      {view.rows.map((row, i) => (
+        <RowCard
+          key={row.key}
+          row={row}
+          judged={view.judged[i]!}
+          mains={mains}
+          options={options}
+          menuBySlug={menuBySlug}
+          onEdit={edit}
+          onToggle={toggleChecked}
+          onRemove={removeRow}
+        />
+      ))}
+
+      <Button type="button" variant="outline" size="lg" className="h-14 w-full border-2 border-dashed text-base" onClick={addRow}>
+        <PlusIcon className="size-5" aria-hidden /> 行を足す
+      </Button>
+
+      {unreadLines.length > 0 && (
+        <section className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 p-4">
+          <p className="text-base font-bold text-amber-900">読み取れなかった行（{unreadLines.length}）</p>
+          <p className="text-sm text-amber-900">予約が入っていたら「行を足す」で入力してください。</p>
+          <ul className="space-y-1 font-mono text-sm text-zinc-700">
+            {unreadLines.map((l, i) => (
+              <li key={i} className="break-all">{l}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {ignoredLines.length > 0 && (
+        <details className="rounded-xl border border-zinc-200 bg-white p-4 text-sm text-zinc-600">
+          <summary className="cursor-pointer">予約ではないと判断して読み飛ばした行（{ignoredLines.length}）</summary>
+          <ul className="mt-2 space-y-1 font-mono">
+            {ignoredLines.map((l, i) => (
+              <li key={i} className="break-all">{l}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      {/* 下に固定の登録ボタン */}
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200 bg-white/95 p-3 backdrop-blur">
+        <div className="mx-auto flex max-w-5xl items-center gap-3">
+          <p className="shrink-0 text-base">
+            チェック <strong className="text-xl">{checkedRows.length}</strong> 件
+          </p>
+          <Button
+            type="button"
+            size="lg"
+            className="h-14 flex-1 text-lg font-bold"
+            disabled={checkedRows.length === 0 || busy !== ""}
+            onClick={() => setConfirmOpen(true)}
+          >
+            {busy === "commit" ? <Loader2Icon className="size-6 animate-spin" aria-hidden /> : null}
+            登録する
+          </Button>
+        </div>
+      </div>
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-lg">{checkedRows.length} 件の予約を登録します</DialogTitle>
+            <DialogDescription className="text-base text-foreground">
+              メールは送りません。登録すると、ネット予約ではこの時間を選べなくなります。
+            </DialogDescription>
+          </DialogHeader>
+          <ul className="max-h-64 space-y-1 overflow-y-auto text-base">
+            {checkedRows.map((r) => (
+              <li key={r.key}>
+                {dateLabel(r.date, false)} {t(r.start)}〜{t(r.end)}　{r.name}様
+                <span className="text-sm text-zinc-600">{menuBySlug.get(r.mainSlug)?.code ?? ""}</span>
+              </li>
+            ))}
+          </ul>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="lg" className="h-12" onClick={() => setConfirmOpen(false)}>
+              やめる
+            </Button>
+            <Button size="lg" className="h-12 font-bold" onClick={commit}>
+              登録する
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <NoticeDialog notice={notice} onOk={() => setNotice(null)} />
+    </div>
   );
 }
 
-// =============================================================================
-// 4) 結果
-// =============================================================================
-function ResultsPanel({
-  rows,
-  results,
-  onRestart,
+// -----------------------------------------------------------------------------
+// 1 件分のカード
+// -----------------------------------------------------------------------------
+
+function RowCard({
+  row,
+  judged,
+  mains,
+  options,
+  menuBySlug,
+  onEdit,
+  onToggle,
+  onRemove,
 }: {
-  rows: DraftRow[];
-  results: CommitRowResult[];
-  onRestart: () => void;
+  row: DraftRow;
+  judged: Judged;
+  mains: MenuEntry[];
+  options: MenuEntry[];
+  menuBySlug: Map<string, MenuEntry>;
+  onEdit: (key: string, patch: Partial<DraftRow>, opts?: { syncEnd?: boolean }) => void;
+  onToggle: (key: string, checked: boolean) => void;
+  onRemove: (key: string) => void;
 }) {
-  const byKey = new Map(rows.map((r) => [r.key, r]));
-  const okCount = results.filter((r) => r.ok && r.reservationCode).length;
-  const failCount = results.filter((r) => !r.ok).length;
+  const st = STATUS_STYLE[judged.status];
+  const id = (s: string) => `${row.key}-${s}`;
+  const minutes = menuMinutes(row.mainSlug, row.optionSlugs, menuBySlug);
+  const endNote =
+    row.endSource === "written"
+      ? "紙に書いた時刻"
+      : row.endSource === "menu"
+        ? minutes > 0
+          ? `メニューの時間（${minutes}分）`
+          : "メニューを選ぶと決まります"
+        : "手で直した時刻";
+  const label = (m: MenuEntry) => (m.code ? `${m.code} ${m.name}` : m.name);
 
   return (
-    <Card>
-      <CardContent className="space-y-4 py-2">
-        <p className="text-lg font-bold">
-          {okCount} 件を登録しました
-          {failCount > 0 && <span className="ml-2 text-red-700">（{failCount} 件は登録できませんでした）</span>}
-        </p>
-        <ul className="divide-y divide-zinc-100 text-sm">
-          {results.map((res) => {
-            const row = byKey.get(res.key);
-            return (
-              <li key={res.key} className="flex flex-wrap items-center gap-2 py-2">
-                {res.ok ? (
-                  <CheckCircle2Icon className="size-4 text-emerald-600" />
-                ) : (
-                  <XCircleIcon className="size-4 text-red-600" />
-                )}
-                {row && (
-                  <span className="font-medium">
-                    {dateLabel(row.date)} {row.start} {row.name} 様
-                  </span>
-                )}
-                <span className={res.ok ? "text-zinc-600" : "text-red-700"}>{res.message}</span>
-                {res.reservationCode && (
-                  <Badge variant="outline" className="tabular-nums">
-                    {res.reservationCode}
-                  </Badge>
-                )}
-              </li>
-            );
-          })}
+    <article className={cn("space-y-4 rounded-xl border-2 bg-white p-4", st.card)}>
+      <div className="flex items-start justify-between gap-3">
+        <label
+          className={cn(
+            "flex min-h-12 items-center gap-3 rounded-lg border px-3 text-base font-bold",
+            judged.status === "error" ? "cursor-not-allowed border-zinc-200 text-zinc-400" : "cursor-pointer border-zinc-300",
+          )}
+        >
+          <input
+            type="checkbox"
+            className="size-6 accent-zinc-900"
+            checked={row.checked}
+            disabled={judged.status === "error"}
+            onChange={(e) => onToggle(row.key, e.target.checked)}
+          />
+          登録する
+        </label>
+        <span className={cn("inline-flex items-center gap-1 rounded-full px-3 py-1 text-sm font-bold", st.badge)}>
+          <st.Icon className="size-4" aria-hidden />
+          {st.label}
+        </span>
+      </div>
+
+      <p className="text-lg font-bold">
+        {dateLabel(row.date)}　{t(row.start)}〜{t(row.end)}
+      </p>
+
+      {judged.reasons.length > 0 && (
+        <ul className="space-y-1">
+          {judged.reasons.map((r, i) => (
+            <li
+              key={i}
+              className={cn(
+                "rounded-md px-3 py-2 text-base",
+                i < judged.errorCount ? "bg-red-100 text-red-900" : "bg-amber-100 text-amber-900",
+              )}
+            >
+              {r}
+            </li>
+          ))}
         </ul>
-        <div className="flex flex-wrap gap-2">
-          <Button render={<Link href="/admin/calendar" />}>カレンダーで確認</Button>
-          <Button variant="outline" render={<Link href="/admin/customers" />}>
-            顧客リストを見る
-          </Button>
-          <Button variant="ghost" onClick={onRestart}>
-            別の写真を取り込む
-          </Button>
+      )}
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-1">
+          <label htmlFor={id("date")} className="text-sm font-bold">日付</label>
+          <input
+            id={id("date")}
+            type="date"
+            value={row.date}
+            onChange={(e) => onEdit(row.key, { date: e.target.value })}
+            className={fieldClass}
+          />
         </div>
-      </CardContent>
-    </Card>
+        <div className="space-y-1">
+          <span className="text-sm font-bold">時刻</span>
+          <div className="flex items-center gap-2">
+            <select
+              aria-label="始まり"
+              value={row.start}
+              onChange={(e) => onEdit(row.key, { start: e.target.value }, { syncEnd: true })}
+              className={fieldClass}
+            >
+              <option value="">始まり</option>
+              {timeOptions(row.start).map((v) => (
+                <option key={v} value={v}>{t(v)}</option>
+              ))}
+            </select>
+            <span aria-hidden>〜</span>
+            <select
+              aria-label="終わり"
+              value={row.end}
+              onChange={(e) => onEdit(row.key, { end: e.target.value, endSource: "manual" })}
+              className={fieldClass}
+            >
+              <option value="">終わり</option>
+              {timeOptions(row.end).map((v) => (
+                <option key={v} value={v}>{t(v)}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-zinc-600">
+            <span>終わり：{endNote}</span>
+            {row.endSource !== "menu" && (
+              <button
+                type="button"
+                className="underline"
+                onClick={() => onEdit(row.key, { endSource: "menu" }, { syncEnd: true })}
+              >
+                メニューの時間にする
+              </button>
+            )}
+            {row.writtenEnd && row.endSource !== "written" && (
+              <button
+                type="button"
+                className="underline"
+                onClick={() => onEdit(row.key, { end: row.writtenEnd, endSource: "written" })}
+              >
+                紙の時刻（{t(row.writtenEnd)}）にする
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <label htmlFor={id("name")} className="text-sm font-bold">お名前</label>
+          <input
+            id={id("name")}
+            value={row.name}
+            onChange={(e) => onEdit(row.key, { name: e.target.value })}
+            className={fieldClass}
+            autoComplete="off"
+          />
+        </div>
+        <div className="space-y-1">
+          <label htmlFor={id("menu")} className="text-sm font-bold">メニュー</label>
+          <select
+            id={id("menu")}
+            value={row.mainSlug}
+            onChange={(e) =>
+              // 自分で選び直したら、読み取りの「確認してください」は消す
+              onEdit(row.key, { mainSlug: e.target.value, menuNotice: "", unknownCodes: [] }, { syncEnd: true })
+            }
+            className={fieldClass}
+          >
+            <option value="">（選んでください）</option>
+            {mains.map((m) => (
+              <option key={m.slug} value={m.slug}>
+                {label(m)}（{m.durationMin}分）
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <details className="sm:col-span-2" open={row.optionSlugs.length > 0}>
+          <summary className="cursor-pointer py-1 text-sm font-bold">
+            オプション
+            {row.optionSlugs.length > 0 &&
+              `：${row.optionSlugs.map((s) => menuBySlug.get(s)?.name ?? s).join("・")}`}
+          </summary>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {options.map((o) => {
+              const on = row.optionSlugs.includes(o.slug);
+              return (
+                <button
+                  key={o.slug}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() =>
+                    onEdit(
+                      row.key,
+                      {
+                        optionSlugs: on ? row.optionSlugs.filter((s) => s !== o.slug) : [...row.optionSlugs, o.slug],
+                      },
+                      { syncEnd: true },
+                    )
+                  }
+                  className={cn(
+                    "min-h-11 rounded-full border px-3 text-sm",
+                    on ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-300 bg-white text-zinc-800",
+                  )}
+                >
+                  {label(o)}
+                </button>
+              );
+            })}
+          </div>
+        </details>
+
+        <div className="space-y-1">
+          <label htmlFor={id("phone")} className="text-sm font-bold">電話番号（分かれば）</label>
+          <input
+            id={id("phone")}
+            type="tel"
+            inputMode="tel"
+            value={row.phone}
+            onChange={(e) => onEdit(row.key, { phone: e.target.value })}
+            className={fieldClass}
+            autoComplete="off"
+          />
+        </div>
+        <div className="space-y-1">
+          <label htmlFor={id("notes")} className="text-sm font-bold">メモ</label>
+          <input
+            id={id("notes")}
+            value={row.notes}
+            onChange={(e) => onEdit(row.key, { notes: e.target.value })}
+            className={fieldClass}
+            autoComplete="off"
+          />
+        </div>
+      </div>
+
+      <div className="flex items-end justify-between gap-3">
+        {row.sourceText ? (
+          <p className="min-w-0 whitespace-pre-wrap break-all text-xs text-zinc-500">
+            読み取った文字：{row.sourceText}
+          </p>
+        ) : (
+          <span className="text-xs text-zinc-500">手で足した行</span>
+        )}
+        <Button
+          type="button"
+          variant="outline"
+          className="h-11 shrink-0 text-red-700"
+          onClick={() => onRemove(row.key)}
+        >
+          <Trash2Icon aria-hidden /> この行を消す
+        </Button>
+      </div>
+    </article>
   );
 }

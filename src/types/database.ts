@@ -258,6 +258,20 @@ export interface Database {
         Args: { p_code: string; p_email: string };
         Returns: ReservationStatus;
       };
+      /** 手書き予約表の貼り付け取り込み（20261012000001_paste_import.sql） */
+      import_handwritten_reservations: {
+        Args: {
+          p_rows: {
+            start_at: string;
+            end_at: string;
+            name: string;
+            phone: string;
+            notes: string;
+            menu_ids: string[];
+          }[];
+        };
+        Returns: { row_index: number; reservation_id: string; reservation_code: string }[];
+      };
       is_admin: {
         Args: { uid: string };
         Returns: boolean;

@@ -25,6 +25,13 @@ export const metadata = {
 
 type Params = Promise<{ id: string }>;
 
+const SOURCE_LABEL: Record<string, string> = {
+  web: "Web予約",
+  phone: "電話（手動登録）",
+  walkin: "来店（手動登録）",
+  handwritten: "手書き予約表の取り込み",
+};
+
 export default async function AdminReservationDetailPage({
   params,
 }: {
@@ -148,7 +155,7 @@ export default async function AdminReservationDetailPage({
 
           <Section label="システム情報">
             <dl className="grid gap-1.5 text-xs text-zinc-500">
-              <Row label="登録経路" value={reservation.source} />
+              <Row label="登録経路" value={SOURCE_LABEL[reservation.source] ?? reservation.source} />
               <Row
                 label="作成"
                 value={formatDateTimeJst(new Date(reservation.created_at))}

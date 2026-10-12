@@ -1,313 +1,234 @@
 "use server";
 /**
- * 管理画面 / 手書き予約表の取り込み。
+ * 管理画面 / 手書き予約表の取り込み（貼り付け）。
  *
- *   1. readSheetAction   写真を AI で読み取り、確認用の行を返す（まだ登録しない）
- *   2. recheckAction     画面で直した内容を検証し直す（重複・警告・候補）
- *   3. commitImportAction 登録する。解決していない重複があれば登録せずに返し、
- *                         画面側でポップアップを出して解決方法を入力してもらう
+ *   1. analyzePasteAction  貼り付けた文字を予約の候補に分ける（まだ登録しない）。
+ *                          判定に使う「すでにある予約」「お休みの設定」も一緒に返す
+ *   2. commitPasteAction   チェックした行を登録する。登録の直前に最新の予約で判定し直し、
+ *                          データベースの関数でまとめて登録する（1 件でも失敗したら全部取り消し）
+ *
+ * 取り込んだ予約: 確定・店頭払い・未払い・source='handwritten'。メールは送らない。
+ * 有料のサービス・AI は使わない（文字の読み取りはこのアプリの中だけで行う）。
  */
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 
 import { requireAdmin } from "@/lib/auth/admin";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { formatDateJst, jstWallToUtc } from "@/lib/timezone";
-import { extractSheet, type SheetImage } from "@/lib/sheet/extract";
-import {
-  buildDraftRows,
-  fetchMenusBySlug,
-  menusForCodes,
-  normalizeTime,
-  recheckRows,
-} from "@/lib/sheet/resolve";
-import type {
-  CommitResult,
-  CommitRowResult,
-  DraftRow,
-  ReadSheetResult,
-  RecheckResult,
-} from "@/lib/sheet/types";
+import type { HolidayOverride } from "@/lib/calendar";
+import { jstWallToUtc } from "@/lib/timezone";
+import { parsePastedText } from "@/lib/paste-import/parse";
+import { toDraftRows } from "@/lib/paste-import/draft";
+import { judgeRows } from "@/lib/paste-import/judge";
+import { makeDayHours } from "@/lib/paste-import/hours";
+import { loadCatalog, loadJudgeData, nowJst } from "@/lib/paste-import/server";
+import type { DraftRow, ExistingReservation, MenuEntry } from "@/lib/paste-import/types";
 
-const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
-const MAX_IMAGES = 3;
+const MAX_TEXT = 20_000;
+const MAX_ROWS = 100;
+/** 判定に使う予約を読む範囲（今日から） */
+const LOOKAHEAD_DAYS = 200;
 
-export async function readSheetAction(input: {
-  images: SheetImage[];
-  fallbackWeekStart: string | null;
-}): Promise<ReadSheetResult> {
-  await requireAdmin();
-
-  const images = input.images.slice(0, MAX_IMAGES);
-  if (images.length === 0) return { ok: false, error: "写真を選んでください。" };
-  if (images.some((i) => !ALLOWED_TYPES.has(i.mediaType))) {
-    return { ok: false, error: "写真は JPEG / PNG / WebP でお願いします。" };
-  }
-  if (images.some((i) => i.kind !== "sheet" && i.kind !== "memo")) {
-    return { ok: false, error: "写真の種類が不正です。" };
-  }
-  const fallback =
-    input.fallbackWeekStart && /^\d{4}-\d{2}-\d{2}$/.test(input.fallbackWeekStart)
-      ? input.fallbackWeekStart
-      : null;
-
-  const res = await extractSheet(images);
-  if (!res.ok) return res;
-
-  try {
-    const { rows, weekStart, sheetWarnings } = await buildDraftRows(res.extraction, fallback);
-    if (res.droppedMemo) {
-      sheetWarnings.unshift(
-        "無料版の読み取りでは、個人情報保護のためお客様メモ（電話番号）のページは送っていません。"
-        + "新規のお客様の電話番号は、下の各行で入力してください。",
-      );
+export type AnalyzeResult =
+  | {
+      ok: true;
+      rows: DraftRow[];
+      unreadLines: string[];
+      ignoredLines: string[];
+      menus: MenuEntry[];
+      existing: ExistingReservation[];
+      overrides: HolidayOverride[];
+      now: { date: string; time: string };
     }
-    return { ok: true, rows, meta: { weekStart, sheetWarnings, model: res.model } };
-  } catch (e) {
-    console.error("[import] build rows error:", e);
-    return { ok: false, error: errorMessage(e, "読み取り結果の確認に失敗しました。") };
-  }
+  | { ok: false; error: string };
+
+function addDays(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
-function errorMessage(e: unknown, fallback: string): string {
-  return e instanceof Error && e.message ? e.message : fallback;
-}
-
-export async function recheckAction(rows: DraftRow[]): Promise<RecheckResult> {
-  await requireAdmin();
-  try {
-    return { ok: true, rows: await recheckRows(rows) };
-  } catch (e) {
-    console.error("[import] recheck error:", e);
-    return { ok: false, error: errorMessage(e, "内容の確認に失敗しました。もう一度お試しください。") };
-  }
-}
-
-function toMin(t: string): number {
-  const [h, m] = t.split(":").map(Number);
-  return (h ?? 0) * 60 + (m ?? 0);
-}
-
-function fromMin(n: number): string {
-  return `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
-}
-
-/** まだ登録できない理由（重複以外）。1 つでもあれば登録させない。 */
-function blockingProblems(row: DraftRow): string[] {
-  const p: string[] = [];
-  if (!row.date) p.push("日付");
-  if (!row.start || !row.end || toMin(row.end) <= toMin(row.start)) p.push("時刻");
-  if (!row.name.trim()) p.push("名前");
-  if (row.customer.mode === "unset") p.push("お客様の選択");
-  return p;
-}
-
-export async function commitImportAction(input: DraftRow[]): Promise<CommitResult> {
+export async function analyzePasteAction(input: {
+  text: string;
+  baseDate: string;
+}): Promise<AnalyzeResult> {
   await requireAdmin();
 
-  // 送られてきた内容を信用せず、登録直前の最新状態で検証し直す
-  let rows: DraftRow[];
-  try {
-    rows = await recheckRows(input);
-  } catch (e) {
-    console.error("[import] commit recheck error:", e);
-    return { ok: false, error: errorMessage(e, "登録前の確認に失敗しました。") };
+  const text = String(input.text ?? "");
+  if (!text.trim()) return { ok: false, error: "文字が貼り付けられていません。" };
+  if (text.length > MAX_TEXT) {
+    return { ok: false, error: "文字が長すぎます。予約表 1 枚分ずつ貼り付けてください。" };
   }
-  const targets = rows.filter((r) => r.include);
-  if (targets.length === 0) {
-    return { ok: false, error: "登録する予約がありません。" };
-  }
+  const now = nowJst();
+  const baseDate = /^\d{4}-\d{2}-\d{2}$/.test(input.baseDate) ? input.baseDate : now.date;
 
-  const problems = targets
-    .map((r) => ({ r, p: blockingProblems(r) }))
-    .filter((x) => x.p.length > 0);
-  if (problems.length > 0) {
-    const first = problems[0]!;
+  try {
+    const catalog = await loadCatalog();
+    const parsed = parsePastedText(text, { baseDate, today: now.date, catalog });
+    const rows = toDraftRows(parsed.rows.slice(0, MAX_ROWS), catalog);
+
+    // 判定用のデータ: 今日から先（読み取った日付がもっと先ならそこまで）
+    const lastRowDate = rows.reduce((m, r) => (r.date > m ? r.date : m), now.date);
+    const until = [addDays(now.date, LOOKAHEAD_DAYS), lastRowDate].sort().at(-1)!;
+    const { existing, overrides } = await loadJudgeData(now.date, until);
+
     return {
-      ok: false,
-      error: `${first.r.name || "（名前なし）"} 様（${first.r.date} ${first.r.start}）の${first.p.join("・")}を確認してください。ほか ${problems.length - 1} 件。`,
-    };
-  }
-
-  // 解決方法が決まっていない重複がある → 画面でポップアップを出す
-  const unresolved = targets.filter((r) => r.conflicts.length > 0 && !r.resolution);
-  if (unresolved.length > 0) {
-    return { ok: false, needsResolution: true, rows };
-  }
-
-  const admin = createSupabaseAdminClient();
-  const bySlug = await fetchMenusBySlug();
-  const today = formatDateJst(new Date());
-  const results: CommitRowResult[] = [];
-
-  // --- 1) システム側の予約を先に動かす（空けてから手書き分を入れる）-------------
-  for (const row of targets) {
-    const res = row.resolution;
-    if (!res || res.target !== "system") continue;
-
-    const { data: existing, error: fetchErr } = await admin
-      .from("reservations")
-      .select("id, code, start_at, end_at")
-      .eq("id", res.reservationId)
-      .maybeSingle();
-    if (fetchErr || !existing) {
-      results.push({ key: row.key, ok: false, message: "変更対象の予約が見つかりませんでした" });
-      row.include = false;
-      continue;
-    }
-
-    if (res.action === "cancel") {
-      const { error } = await admin
-        .from("reservations")
-        .update({ status: "cancelled" })
-        .eq("id", existing.id);
-      if (error) {
-        results.push({ key: row.key, ok: false, message: `${existing.code} のキャンセルに失敗しました` });
-        row.include = false;
-      }
-    } else {
-      const start = normalizeTime(res.start);
-      const durationMs =
-        new Date(existing.end_at).getTime() - new Date(existing.start_at).getTime();
-      const startAt = jstWallToUtc(res.date, start);
-      const { error } = await admin
-        .from("reservations")
-        .update({
-          start_at: startAt.toISOString(),
-          end_at: new Date(startAt.getTime() + durationMs).toISOString(),
-        })
-        .eq("id", existing.id);
-      if (error) {
-        const msg =
-          error.code === "23P01"
-            ? `${existing.code} の移動先（${res.date} ${start}）にも予約が入っています`
-            : `${existing.code} の日時変更に失敗しました`;
-        results.push({ key: row.key, ok: false, message: msg });
-        row.include = false;
-      }
-    }
-  }
-
-  // --- 2) 手書きの予約を登録する ---------------------------------------------
-  for (const row of targets) {
-    if (!row.include) continue;
-    const res = row.resolution;
-
-    if (res?.target === "sheet" && res.action === "skip") {
-      results.push({ key: row.key, ok: true, message: "登録しませんでした（重複のため）" });
-      continue;
-    }
-
-    let date = row.date;
-    let start = row.start;
-    let end = row.end;
-    if (res?.target === "sheet" && res.action === "move") {
-      const len = toMin(end) - toMin(start);
-      date = res.date;
-      start = normalizeTime(res.start);
-      end = fromMin(toMin(start) + len);
-    }
-
-    // お客様を決める
-    let customerId: string;
-    let customerName = row.name.trim();
-    let customerPhone = row.memoPhone.trim();
-    let customerEmail = "";
-
-    if (row.customer.mode === "existing") {
-      const { data: c, error } = await admin
-        .from("customers")
-        .select("id, name, phone, email")
-        .eq("id", row.customer.id)
-        .maybeSingle();
-      if (error || !c) {
-        results.push({ key: row.key, ok: false, message: "選んだお客様が顧客リストに見つかりません" });
-        continue;
-      }
-      customerId = c.id;
-      customerName = c.name;
-      customerPhone = c.phone ?? customerPhone;
-      customerEmail = c.email ?? "";
-    } else if (row.customer.mode === "new") {
-      const name = row.customer.name.trim() || row.name.trim();
-      const phone = row.customer.phone.trim() || row.memoPhone.trim();
-      const { data: c, error } = await admin
-        .from("customers")
-        .insert({ name, phone: phone || null, source: "handwritten" })
-        .select("id")
-        .single();
-      if (error || !c) {
-        console.error("[import] customer insert error:", error);
-        results.push({ key: row.key, ok: false, message: "顧客リストへの追加に失敗しました" });
-        continue;
-      }
-      customerId = c.id;
-      customerName = name;
-      customerPhone = phone;
-    } else {
-      results.push({ key: row.key, ok: false, message: "お客様が選ばれていません" });
-      continue;
-    }
-
-    const menus = menusForCodes(row.codes, bySlug);
-    const startAt = jstWallToUtc(date, start);
-    const endAt = jstWallToUtc(date, end);
-
-    const { data: inserted, error } = await admin
-      .from("reservations")
-      .insert({
-        customer_id: null,
-        customer_record_id: customerId,
-        start_at: startAt.toISOString(),
-        end_at: endAt.toISOString(),
-        customer_name: customerName,
-        customer_email: customerEmail,
-        customer_phone: customerPhone,
-        total_price: menus.reduce((s, m) => s + m.price, 0),
-        payment_method: "in_store",
-        payment_status: "unpaid",
-        stripe_payment_intent: null,
-        status: "confirmed",
-        source: "handwritten",
-        notes: `手書き予約表から取り込み（${today}）／記入: ${row.name} ${row.courseText}`.trim(),
-      })
-      .select("id, code")
-      .single();
-
-    if (error || !inserted) {
-      const msg =
-        error?.code === "23P01"
-          ? "その時間帯には別の予約が入っているため登録できませんでした"
-          : "予約の登録に失敗しました";
-      if (error?.code !== "23P01") console.error("[import] insert error:", error);
-      results.push({ key: row.key, ok: false, message: msg });
-      continue;
-    }
-
-    if (menus.length > 0) {
-      const { error: itemErr } = await admin.from("reservation_items").insert(
-        menus.map((m, i) => ({
-          reservation_id: inserted.id,
-          menu_id: m.id,
-          name_snapshot: m.name,
-          price_snapshot: m.price,
-          duration_snapshot: m.duration_min,
-          sort_order: i + 1,
-        })),
-      );
-      if (itemErr) console.error("[import] items insert error:", itemErr);
-    }
-
-    results.push({
-      key: row.key,
       ok: true,
-      message: "登録しました",
-      reservationCode: inserted.code,
-    });
+      rows,
+      unreadLines: parsed.unreadLines,
+      ignoredLines: parsed.ignoredLines,
+      menus: catalog.menus,
+      existing,
+      overrides,
+      now,
+    };
+  } catch (e) {
+    console.error("[paste-import] analyze error:", e);
+    return { ok: false, error: "読み込みに失敗しました。少し待ってから、もう一度お試しください。" };
   }
+}
 
-  revalidatePath("/admin");
-  revalidatePath("/admin/reservations");
-  revalidatePath("/admin/calendar");
-  revalidatePath("/admin/customers");
-  return { ok: true, results };
+/** 判定に使う予約・お休みの設定を読み直す（登録できなかったあとに、最新の状態で判定し直すため） */
+export async function refreshJudgeDataAction(input: { until: string }): Promise<
+  | { ok: true; existing: ExistingReservation[]; overrides: HolidayOverride[] }
+  | { ok: false; error: string }
+> {
+  await requireAdmin();
+  const now = nowJst();
+  const asked = /^\d{4}-\d{2}-\d{2}$/.test(input.until) ? input.until : now.date;
+  const until = [addDays(now.date, LOOKAHEAD_DAYS), asked].sort().at(-1)!;
+  try {
+    return { ok: true, ...(await loadJudgeData(now.date, until)) };
+  } catch (e) {
+    console.error("[paste-import] refresh error:", e);
+    return { ok: false, error: "最新の予約を読めませんでした。" };
+  }
+}
+
+// -----------------------------------------------------------------------------
+// 登録
+// -----------------------------------------------------------------------------
+
+const hhmm = z.string().regex(/^\d{2}:\d{2}$/);
+const rowSchema = z.object({
+  key: z.string().max(20),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  start: hhmm,
+  end: hhmm,
+  endSource: z.enum(["written", "menu", "manual"]),
+  writtenEnd: z.string().max(5),
+  name: z.string().trim().min(1).max(50),
+  phone: z.string().trim().max(20),
+  notes: z.string().trim().max(500),
+  mainSlug: z.string().max(60),
+  optionSlugs: z.array(z.string().max(60)).max(15),
+  menuNotice: z.string().max(1000),
+  unknownCodes: z.array(z.string().max(10)).max(20),
+  sourceText: z.string().max(2000),
+  checked: z.boolean(),
+  lastStatus: z.enum(["ok", "check", "error"]).nullable(),
+});
+
+export type CommitResult =
+  | { ok: true; count: number; codes: string[] }
+  | { ok: false; error: string; rowErrors?: { key: string; reasons: string[] }[] };
+
+const RPC_REASON: Record<string, string> = {
+  invalid_time: "時刻が正しくありません",
+  invalid_name: "お名前がありません",
+  invalid_menu: "メニューが見つかりません（販売をやめたメニューかもしれません）",
+  past: "過去の日時です",
+  duplicate: "同じ予約がすでに登録されています",
+  slot_taken: "この時間には、すでに別の予約があります",
+};
+
+function rowLabel(r: Pick<DraftRow, "name" | "date" | "start">): string {
+  const [, m, d] = r.date.split("-");
+  return `${r.name || "（お名前なし）"}様（${Number(m)}/${Number(d)} ${r.start.replace(/^0/, "")}）`;
+}
+
+export async function commitPasteAction(input: { rows: DraftRow[] }): Promise<CommitResult> {
+  await requireAdmin();
+
+  const parsed = z.array(rowSchema).min(1).max(MAX_ROWS).safeParse(input.rows);
+  if (!parsed.success) {
+    return { ok: false, error: "登録する内容に、正しくない所があります。画面を確かめてください。" };
+  }
+  const rows = parsed.data as DraftRow[];
+
+  try {
+    const catalog = await loadCatalog();
+    const bySlug = new Map(catalog.menus.map((m) => [m.slug, m]));
+    const now = nowJst();
+
+    // 最新の予約で判定し直す（画面を開いている間に Web 予約が入ったかもしれない）
+    const dates = rows.map((r) => r.date).sort();
+    const { existing, overrides } = await loadJudgeData(dates[0]!, dates.at(-1)!);
+    const judged = judgeRows(rows, { nowDate: now.date, nowTime: now.time, dayHours: makeDayHours(overrides), existing });
+
+    const rowErrors = rows
+      .map((r, i) => ({ key: r.key, status: judged[i]!.status, reasons: judged[i]!.reasons }))
+      .filter((x) => x.status === "error")
+      .map(({ key, reasons }) => ({ key, reasons }));
+    if (rowErrors.length > 0) {
+      return {
+        ok: false,
+        error: `登録できない予約が ${rowErrors.length} 件ありました。赤い所を直すか、チェックを外してください。（まだ 1 件も登録していません）`,
+        rowErrors,
+      };
+    }
+
+    // メニューの id（コース → オプションの順。同じものは 1 つに）
+    const payload = [];
+    for (const r of rows) {
+      const ids = [...new Set([r.mainSlug, ...r.optionSlugs].filter(Boolean))].map((s) => bySlug.get(s)?.id);
+      if (ids.length === 0 || ids.some((id) => !id)) {
+        return {
+          ok: false,
+          error: `${rowLabel(r)}のメニューが見つかりません。メニューを選び直してください。（まだ 1 件も登録していません）`,
+          rowErrors: [{ key: r.key, reasons: ["メニューを選び直してください"] }],
+        };
+      }
+      payload.push({
+        start_at: jstWallToUtc(r.date, r.start).toISOString(),
+        end_at: jstWallToUtc(r.date, r.end).toISOString(),
+        name: r.name.trim(),
+        phone: r.phone.trim(),
+        notes: r.notes.trim(),
+        menu_ids: ids as string[],
+      });
+    }
+
+    const admin = createSupabaseAdminClient();
+    const { data, error } = await admin.rpc("import_handwritten_reservations", { p_rows: payload });
+
+    if (error) {
+      const m = /import_row_error:(\d+):(\w+)/.exec(error.message ?? "");
+      if (m) {
+        const r = rows[Number(m[1]) - 1];
+        const reason = RPC_REASON[m[2]!] ?? "登録できませんでした";
+        return {
+          ok: false,
+          error: `${r ? rowLabel(r) : "ある予約"}: ${reason}。（まだ 1 件も登録していません）`,
+          rowErrors: r ? [{ key: r.key, reasons: [reason] }] : undefined,
+        };
+      }
+      console.error("[paste-import] rpc error:", error);
+      if (error.code === "PGRST202" || /import_handwritten_reservations/.test(error.message ?? "")) {
+        return {
+          ok: false,
+          error: "取り込みの準備（データベースの更新）がまだ済んでいません。システムの担当者に連絡してください。",
+        };
+      }
+      return { ok: false, error: "登録に失敗しました。何も登録していません。もう一度お試しください。" };
+    }
+
+    revalidatePath("/admin");
+    revalidatePath("/admin/reservations");
+    revalidatePath("/admin/calendar");
+    return { ok: true, count: data?.length ?? 0, codes: (data ?? []).map((d) => d.reservation_code) };
+  } catch (e) {
+    console.error("[paste-import] commit error:", e);
+    return { ok: false, error: "登録に失敗しました。何も登録していません。もう一度お試しください。" };
+  }
 }

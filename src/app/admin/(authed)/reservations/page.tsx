@@ -223,6 +223,11 @@ export default async function AdminReservationsPage({
                           className="block font-medium"
                         >
                           {r.customer_name}
+                          {r.source === "handwritten" && (
+                            <span className="ml-1.5 inline-block rounded border border-zinc-300 px-1 text-[10px] font-normal text-zinc-600">
+                              手書き
+                            </span>
+                          )}
                         </Link>
                       </TableCell>
                       <TableCell className="hidden text-xs text-zinc-500 md:table-cell">

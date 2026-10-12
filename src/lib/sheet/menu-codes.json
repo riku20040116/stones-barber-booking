@@ -1,5 +1,5 @@
 {
-  "$comment": "手書き予約表のメニュー記号。予約表PDF（scripts/make_booking_sheet.py）と写真の取り込み（src/lib/sheet/）の両方がこのファイルを読む。記号を変えたら予約表PDFも作り直すこと。slug は menus テーブルの slug。aliases は昔の用紙で使っていた記号で、古い用紙を撮影しても読めるように残している。",
+  "$comment": "手書き予約表のメニュー記号。予約表PDF（scripts/make_booking_sheet.py）と貼り付け取り込み（src/lib/paste-import/）の両方がこのファイルを読む。記号を変えたら予約表PDFも作り直すこと。slug は menus テーブルの slug。aliases は昔の用紙で使っていた記号で、古い用紙でも読めるように残している。記号以外の略し方は src/lib/paste-import/aliases.ts に書く。",
   "rule": {
     "text": "コース記号をまず書き、オプションを付ける場合だけ「+記号」を続ける",
     "examples": [

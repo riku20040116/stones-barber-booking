@@ -8,12 +8,11 @@
     "start": "next start --port 3100",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"src/lib/**/*.test.ts\"",
     "create-admin": "node scripts/create-admin.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.127.0",
     "@base-ui/react": "^1.4.1",
-    "@google/genai": "^2.24.0",
     "@hookform/resolvers": "^5.2.2",
     "@stripe/stripe-js": "^9.4.0",
     "@supabase/ssr": "^0.10.2",
