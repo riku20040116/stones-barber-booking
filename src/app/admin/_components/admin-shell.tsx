@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   CalendarDaysIcon,
   CalendarIcon,
-  CameraIcon,
+  ClipboardPasteIcon,
   ExternalLinkIcon,
   GaugeIcon,
   ListChecksIcon,
@@ -44,7 +44,7 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { href: "/admin", label: "ダッシュボード", icon: GaugeIcon, exact: true },
   { href: "/admin/reservations", label: "予約管理", icon: ListChecksIcon },
-  { href: "/admin/import", label: "手書き予約の取り込み", icon: CameraIcon },
+  { href: "/admin/import", label: "手書き予約の取り込み", icon: ClipboardPasteIcon },
   { href: "/admin/customers", label: "顧客リスト", icon: UsersIcon },
   { href: "/admin/calendar", label: "カレンダー", icon: CalendarIcon },
   {

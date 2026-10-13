@@ -441,7 +441,8 @@ export function ImportFlow({ today }: { today: string }) {
       )}
 
       {/* 下に固定の登録ボタン */}
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200 bg-white/95 p-3 backdrop-blur">
+      {/* md 以上は左にサイドバー（w-60）があるので、その分だけ右に寄せる */}
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200 bg-white/95 p-3 backdrop-blur md:left-60">
         <div className="mx-auto flex max-w-5xl items-center gap-3">
           <p className="shrink-0 text-base">
             チェック <strong className="text-xl">{checkedRows.length}</strong> 件
@@ -471,7 +472,7 @@ export function ImportFlow({ today }: { today: string }) {
             {checkedRows.map((r) => (
               <li key={r.key}>
                 {dateLabel(r.date, false)} {t(r.start)}〜{t(r.end)}　{r.name}様
-                <span className="text-sm text-zinc-600">{menuBySlug.get(r.mainSlug)?.code ?? ""}</span>
+                <span className="text-sm text-muted-foreground">{menuBySlug.get(r.mainSlug)?.code ?? ""}</span>
               </li>
             ))}
           </ul>
