@@ -40,7 +40,7 @@ test("終了時刻: 紙に書いてあればそれ、無ければメニューの
   const rows = drafts("10:00〜10:45 山田 C2\n11:00 佐藤 C2+S");
   assert.deepEqual(rows.map((r) => [r.start, r.end, r.endSource]), [
     ["10:00", "10:45", "written"],
-    ["11:00", "11:50", "menu"], // 35 分 + 15 分
+    ["11:00", "12:00", "menu"], // 45 分 + 15 分
   ]);
   assert.deepEqual(rows[1]!.optionSlugs, ["opt-face-shave"]);
   assert.equal(rows[1]!.mainSlug, "cut-adult");
@@ -49,8 +49,8 @@ test("終了時刻: 紙に書いてあればそれ、無ければメニューの
 test("メニューを直すと終了時刻も直る（メニューから決めた行だけ）", () => {
   const [written, menu] = drafts("10:00〜10:45 山田 C2\n11:00 佐藤 C2");
   assert.equal(syncEnd({ ...written!, mainSlug: "course-king" }, TEST_MENUS).end, "10:45");
-  assert.equal(syncEnd({ ...menu!, mainSlug: "course-king" }, TEST_MENUS).end, "12:50");
-  assert.equal(syncEnd({ ...menu!, start: "13:00" }, TEST_MENUS).end, "13:35");
+  assert.equal(syncEnd({ ...menu!, mainSlug: "course-king" }, TEST_MENUS).end, "12:30");
+  assert.equal(syncEnd({ ...menu!, start: "13:00" }, TEST_MENUS).end, "13:45");
 });
 
 test("コースが 2 つ・似ている名前のときは知らせる文を付ける", () => {
@@ -121,7 +121,7 @@ test("同じ文字を 2 回貼り付けても、2 回目は全部エラー", () 
 test("一覧の中で重なる → 両方エラー", () => {
   const judged = judgeText("10:00 山田 C2\n10:15 佐藤 C2");
   assert.deepEqual(judged.map((j) => j.status), ["error", "error"]);
-  assert.equal(judged[0]!.reasons[0], "一覧の中の佐藤様（10:15〜10:50）と時間が重なっています");
+  assert.equal(judged[0]!.reasons[0], "一覧の中の佐藤様（10:15〜11:00）と時間が重なっています");
 });
 
 test("一覧の中に同じ予約が 2 つ → 後ろの行だけエラー", () => {

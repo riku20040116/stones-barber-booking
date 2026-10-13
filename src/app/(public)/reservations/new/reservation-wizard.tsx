@@ -750,6 +750,16 @@ function MenuStep({
                 </>
               )}
             </p>
+            {/* オーナー様のご要望（2026-10）: 時間のかかるハードパーマはネット予約ではなく電話で受ける */}
+            {cat === "perm" && (
+              <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm leading-relaxed text-amber-900">
+                {"ハードパーマ（針金・スパイキーアフロ・アフロ・ボルサリーノ）は時間を要するため、お店にお電話ください（"}
+                <a href="tel:0922318037" className="font-medium underline">
+                  092-231-8037
+                </a>
+                {"）。"}
+              </p>
+            )}
             <div className="grid gap-3">
               {/* オプションタブの先頭: 「オプションなし」でそのまま日時選択へ */}
               {cat === "option" && (
