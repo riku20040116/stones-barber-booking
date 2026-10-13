@@ -14,6 +14,10 @@ import type { Catalog, DraftRow, MenuEntry, ParsedRow } from "./types";
  */
 export const END_TIME_POLICY: "written-first" | "menu" = "written-first";
 
+/** 予約表をそのままコピーした文字から作った行に付ける注意（日付を選び直すと消える） */
+export const DATE_UNSURE_NOTICE =
+  "この文字からは、何曜日の予約か分かりません。日付が合っているか確かめてください";
+
 export function toMinutes(t: string): number {
   const [h, m] = t.split(":").map(Number);
   return (h ?? 0) * 60 + (m ?? 0);
@@ -80,6 +84,7 @@ export function toDraftRows(parsed: ParsedRow[], catalog: Catalog): DraftRow[] {
       mainSlug: base.mainSlug,
       optionSlugs: base.optionSlugs,
       menuNotice: notices.join(" / "),
+      dateNotice: p.dateUnsure ? DATE_UNSURE_NOTICE : "",
       unknownCodes: p.unknownCodes,
       sourceText: p.sourceLines.join("\n"),
       checked: false,
@@ -110,6 +115,7 @@ export function blankRow(date: string, seq: number): DraftRow {
     mainSlug: "",
     optionSlugs: [],
     menuNotice: "",
+    dateNotice: "",
     unknownCodes: [],
     sourceText: "",
     checked: false,

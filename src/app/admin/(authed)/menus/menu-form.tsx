@@ -178,6 +178,21 @@ export function MenuForm({
           />
           公開する
         </label>
+        <label className="flex items-start gap-2 text-sm md:col-span-2">
+          <input
+            type="checkbox"
+            name="show_on_web"
+            defaultChecked={initial?.show_on_web ?? true}
+            className="mt-0.5 size-4 accent-zinc-900"
+          />
+          <span>
+            ネット予約に出す
+            <span className="block text-xs text-zinc-500">
+              外すと、お店のメニューには残りますが、お客様のネット予約では選べなくなります
+              （手動予約登録・手書き予約の取り込みでは選べます）。
+            </span>
+          </span>
+        </label>
       </div>
 
       {error && (

@@ -35,6 +35,8 @@ export type AnalyzeResult =
       rows: DraftRow[];
       unreadLines: string[];
       ignoredLines: string[];
+      /** 予約表をそのままコピーした文字だった（日付・時刻は文字から決めていない） */
+      sheetMode: boolean;
       menus: MenuEntry[];
       existing: ExistingReservation[];
       overrides: HolidayOverride[];
@@ -77,6 +79,7 @@ export async function analyzePasteAction(input: {
       rows,
       unreadLines: parsed.unreadLines,
       ignoredLines: parsed.ignoredLines,
+      sheetMode: parsed.sheetMode,
       menus: catalog.menus,
       existing,
       overrides,
@@ -123,6 +126,7 @@ const rowSchema = z.object({
   mainSlug: z.string().max(60),
   optionSlugs: z.array(z.string().max(60)).max(15),
   menuNotice: z.string().max(1000),
+  dateNotice: z.string().max(200),
   unknownCodes: z.array(z.string().max(10)).max(20),
   sourceText: z.string().max(2000),
   checked: z.boolean(),

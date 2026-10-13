@@ -70,6 +70,11 @@ export interface Database {
           age_group: string | null;
           sort_order: number;
           is_active: boolean;
+          /**
+           * ネット予約のメニューに出すか（20261013000002_menu_web_visibility.sql）。
+           * false でもお店のメニューとしては有効で、手動登録・手書き予約表の取り込みでは選べる。
+           */
+          show_on_web: boolean;
           image_url: string | null;
           created_at: string;
           updated_at: string;

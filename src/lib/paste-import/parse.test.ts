@@ -64,12 +64,169 @@ test("Google の AI の回答から 6 件読める", () => {
     { date: "2026-10-10", start: "12:15", end: "13:15", name: "田中", menus: ["cut-adult-shave"] },
     { date: "2026-10-11", start: "15:45", end: "16:45", name: "遠藤", menus: ["cut-junior-high"] },
   ]);
+  // AI の回答は「予約表そのままの文字」ではない（日付と時刻を文字から読んでよい）
+  assert.equal(res.sheetMode, false);
   // 前置きとしめくくりの文章は読み飛ばす
   assert.equal(res.ignoredLines.length, 2);
   assert.deepEqual(res.unreadLines, []);
   // 元の文字が残っている（確認画面で小さく見せる）
   assert.ok(res.rows[0]!.sourceLines.some((l) => l.includes("北村")));
   assert.ok(res.rows[0]!.menus.every((h) => h.sure));
+});
+
+// -----------------------------------------------------------------------------
+// Google レンズで予約表をそのままコピーした文字
+//   紙では「何曜日か」「何時からか」を枠の位置で表しているので、文字には残らない。
+//   文字の中の日付（列の見出し）と時刻（印刷された目盛り）を、予約の日時にしてはいけない。
+// -----------------------------------------------------------------------------
+
+/** 2026-10-13 にオーナー様の Pixel でコピーした文字そのまま（レンズが「翻訳」になっていて C2→チェコ共和国 などに化けている） */
+const LENS_TRANSLATED = `P
+
+予約表 火~日 STONE'S BARBER
+
+この週の火曜日
+
+10月20日
+
+取り込み日
+
+予約が入ったら、上下の破線をなぞって四角で囲み、四角の中に名前・コースを書く / 取り消しは名前・コースの上から×をかぶせる(無効)
+
+・記入
+
+10月25日（日） - 休憩時間
+
+9:00
+
+9:30
+
+(火)
+
+10月2日(水)
+
+時刻
+
+名
+
+9:30
+
+10月22日(木)
+
+10月3日(金) 休
+
+10:00
+
+ヒグマ
+
+チェコ共和国
+
+C2
+
+10:00
+
+11:00
+
+ゴトウ
+
+円周率
+
+$1.30
+
+12:00
+
+12:38
+
+12:00
+
+12:20
+
+13:00
+
+サカグチ
+
+22
+
+13:00
+
+13:30
+
+14:00
+
+ンゲモト
+
+14:30
+
+15:00
+
+15:00
+
+ワタナベ
+
+15.
+
+18:00
+
+タナベ
+
+02
+
+18-20
+
+17:00
+
+17:00
+
+ト 52
+
+18:00
+
+19:30
+
+シベタ
+
+C2
+
+19:00`;
+
+test("レンズの文字（実物）: 印刷された時刻・列の日付を、予約の日時にしない", () => {
+  const res = parse(LENS_TRANSLATED, "2026-10-21");
+  assert.equal(res.sheetMode, true);
+  assert.ok(res.rows.length > 0);
+  for (const r of res.rows) {
+    assert.equal(r.start, "", `「${r.name}」に時刻が付いている`);
+    assert.equal(r.date, "2026-10-21", `「${r.name}」の日付が文字から決まっている`);
+    assert.equal(r.dateUnsure, true);
+  }
+  // お名前は候補として残る（時刻とメニューは確認画面で選ぶ）
+  const names = res.rows.map((r) => r.name);
+  for (const n of ["ヒグマ", "ゴトウ", "サカグチ", "ワタナベ", "タナベ", "シベタ"]) {
+    assert.ok(names.includes(n), `${n} が候補に無い: ${names.join(",")}`);
+  }
+});
+
+test("レンズの文字（翻訳なしの想定）: お名前とコースの組になる", () => {
+  const res = parse(
+    [
+      "予約表 火~日 STONE'S BARBER", "この週の火曜日 2026 年 10 月 20 日", "取り込み日 月 日",
+      "時刻", "A 10 月 20 日 (火) 休", "B 10 月 21 日 (水) 休", "名前 コース",
+      "9:00", "9:30", "ヒグマ C2", "10:00", "トヨカワ", "C2", "11:00", "ゴトウ P1", "12:00",
+      "サカグチ", "C2", "13:00", "14:00", "シゲモト C1", "19:00",
+      "1 行 = 15 分 横線はすべて破線 営業 火〜金 9:30-19:30 / 土日祝 9:00-19:00",
+    ].join("\n"),
+    "2026-10-21",
+  );
+  assert.equal(res.sheetMode, true);
+  assert.deepEqual(
+    res.rows.map((r) => [r.date, r.start, r.name, r.menus[0]?.slug]),
+    [
+      ["2026-10-21", "", "ヒグマ", "cut-adult"],
+      ["2026-10-21", "", "トヨカワ", "cut-adult"],
+      ["2026-10-21", "", "ゴトウ", "perm-standard"],
+      ["2026-10-21", "", "サカグチ", "cut-adult"],
+      ["2026-10-21", "", "シゲモト", "cut-adult-shave"],
+    ],
+  );
 });
 
 // -----------------------------------------------------------------------------
@@ -263,9 +420,22 @@ test("1 行に 2 件あっても分ける", () => {
   ]);
 });
 
-test("印刷された時刻の目盛り（時刻だけの行が続く）は読み飛ばす", () => {
+test("時刻だけの行は、印刷された目盛りとみなして予約の時刻にしない", () => {
+  const res = parse(["10:00", "山田 C2"].join("\n"), "2026-10-15");
+  assert.deepEqual(res.rows.map((r) => [r.start, r.name]), [["", "山田"]]);
+  assert.deepEqual(res.ignoredLines, ["10:00"]);
+  assert.equal(res.sheetMode, false);
+});
+
+test("見出しつきの時刻・範囲の時刻は、人が書いたものとして使う", () => {
+  const res = parse(["時間：10:00", "山田 C2", "11:00〜11:45", "佐藤 C2"].join("\n"), "2026-10-15");
+  assert.deepEqual(res.rows.map((r) => [r.start, r.name]), [["10:00", "山田"], ["11:00", "佐藤"]]);
+});
+
+test("時刻だけの行が 3 行以上あれば予約表の文字とみなし、同じ行の時刻も使わない", () => {
   const res = parse(["9:00", "9:15", "9:30", "9:45", "10:00 山田 C2"].join("\n"), "2026-10-15");
-  assert.deepEqual(res.rows.map((r) => [r.start, r.name]), [["10:00", "山田"]]);
+  assert.equal(res.sheetMode, true);
+  assert.deepEqual(res.rows.map((r) => [r.start, r.name, r.dateUnsure]), [["", "山田", true]]);
   assert.equal(res.ignoredLines.length, 4);
 });
 
@@ -299,7 +469,7 @@ test("時刻が無くてもメニューがあれば候補にする（確認画�
 
 test("空の文字", () => {
   const res = parse("  \n\n ");
-  assert.deepEqual(res, { rows: [], unreadLines: [], ignoredLines: [] });
+  assert.deepEqual(res, { rows: [], unreadLines: [], ignoredLines: [], sheetMode: false });
 });
 
 // -----------------------------------------------------------------------------

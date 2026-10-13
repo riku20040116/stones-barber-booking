@@ -224,14 +224,24 @@ const STOP_WORDS = new Set(
     "予約表", "予約", "予約内容", "名前", "お名前", "コース", "メニュー", "時刻", "時間",
     "開始", "終了", "休", "備考", "メモ", "電話", "電話番号", "月", "日", "年", "STONE'S BARBER",
     "STONES BARBER", "この週の火曜日", "取り込み日", "取り込んだら記入", "火~日", "以上",
+    "名", "記入",
     // メニューの一部として書かれやすい言葉（「カット シャンプー 顔剃り」など）
     "シャンプー",
   ].map((w) => looseKey(w)),
 );
 
 /** 予約表に印刷されている説明の行（レンズで表ごとコピーしたときに混ざる） */
-const PRINTED_RE = /定休|営業\s|営業時間|破線|なぞ|取り込|記入例|所要時間|ページ目|行\s*=\s*15/;
+const PRINTED_RE = /定休|営業\s|営業時間|破線|なぞ|取り込|記入例|所要時間|ページ目|行\s*=\s*15|この週の火曜日/;
 const SHOP_NAME_RE = /STONE.?S\s*BARBER/gi;
+
+/**
+ * 「予約表（紙）をそのままコピーした文字」かどうかの目印。2 つ以上あれば、そうだとみなす。
+ *
+ * 予約表は、どの曜日の予約か・何時からの予約かを「枠の位置」で表している。
+ * 文字にすると位置が消えるので、文字の中の日付（列の見出し）や時刻（印刷された目盛り）を
+ * 予約の日時として使ってはいけない（もっともらしいが間違った日時になる）。
+ */
+const SHEET_MARKERS = [/この週の火曜日/, /取り込み日/, /破線/, /^時刻$/, /予約表\s*火\s*~\s*日/, /記号・所要時間/];
 
 function isProse(text: string): boolean {
   return /。/.test(text) || /(です|ます|ください|ません)[!！]?$/.test(text);
@@ -250,7 +260,14 @@ type LineInfo = {
   unknownCodes: string[];
   words: string[];
   notes: string[];
-  /** 時刻ひとつだけの行（印刷された時刻の目盛りかもしれない） */
+  /**
+   * 時刻の書かれ方。
+   *   range    … 「12:15〜13:00」のように範囲で書いてある（人が書いた予約の時間）
+   *   labelled … 「時間：10:00」のように見出しつき
+   *   single   … 時刻がひとつだけ（予約表の印刷された目盛りかもしれない）
+   */
+  timeKind: "none" | "single" | "range" | "labelled";
+  /** 時刻ひとつだけで、ほかに何も無い行（印刷された時刻の目盛りとみなして使わない） */
   bareTime: boolean;
 };
 
@@ -391,6 +408,7 @@ function extractWords(text: string, catalog: Catalog): { hits: MenuHit[]; rest: 
 function cleanWords(text: string): { words: string[]; onlyPrinted: boolean } {
   const all = text
     .replace(SHOP_NAME_RE, " 予約表 ")
+    .replace(/火\s*~\s*日/g, " 予約表 ") // 予約表の題「予約表 火〜日」
     .replace(HONORIFIC_RE, " ")
     .replace(/[、。,.:;!?「」『』【】[\]<>"'*#~\-=_|\\/()（）←→]/g, " ")
     .split(/\s+/)
@@ -399,7 +417,7 @@ function cleanWords(text: string): { words: string[]; onlyPrinted: boolean } {
   const words = all.filter(
     (w) =>
       !STOP_WORDS.has(looseKey(w)) &&
-      /[^\d]/.test(w) &&
+      /\p{L}/u.test(w) && // 文字（かな・漢字・英字）が 1 つも無いもの（「22」「$1」など）は名前にしない
       !/^[A-Za-z]$/.test(w), // 列の記号（A〜F）など 1 文字の英字は名前にしない
   );
   return { words, onlyPrinted: all.length > 0 && words.length === 0 && all.some((w) => STOP_WORDS.has(looseKey(w))) };
@@ -418,6 +436,7 @@ function parseSegment(segment: string, raw: string, opts: ParseOptions): LineInf
     unknownCodes: [],
     words: [],
     notes: [],
+    timeKind: "none",
     bareTime: false,
   };
   let s = segment.replace(BULLET_RE, "");
@@ -461,6 +480,7 @@ function parseSegment(segment: string, raw: string, opts: ParseOptions): LineInf
     const [pair] = pairTimes(s, toks);
     info.start = pair!.start.hhmm;
     if (pair!.end) info.end = pair!.end.hhmm;
+    info.timeKind = pair!.end ? "range" : label === "時間" || label === "時刻" ? "labelled" : "single";
     // 取り出した時刻の部分を消す（後ろから）
     for (const t of [...toks].reverse()) s = s.slice(0, t.idx) + " " + s.slice(t.idx + t.len);
     s = s.replace(/(^|\s)(~|-|から)(?=\s|$)/g, " ");
@@ -508,8 +528,9 @@ function parseSegment(segment: string, raw: string, opts: ParseOptions): LineInf
     info.unknownCodes.length === 0 && info.words.length === 0 && info.notes.length === 0;
   info.header = Boolean(onlyDate);
   info.bareTime =
-    Boolean(info.start) && !info.end && !info.date && !info.phone &&
-    info.hits.length === 0 && info.words.length === 0 && info.notes.length === 0;
+    info.timeKind === "single" && !info.date && !info.phone &&
+    info.hits.length === 0 && info.unknownCodes.length === 0 &&
+    info.words.length === 0 && info.notes.length === 0;
   return info;
 }
 
@@ -581,14 +602,12 @@ export function parsePastedText(text: string, opts: ParseOptions): ParseResult {
     infos.push(...parseLine(raw, opts));
   }
 
-  // 時刻だけの行が 3 行以上続く所は、印刷された時刻の目盛りとみなして読み飛ばす
-  const skip = new Set<number>();
-  for (let i = 0; i < infos.length; ) {
-    let j = i;
-    while (j < infos.length && infos[j]!.bareTime) j++;
-    if (j - i >= 3) for (let k = i; k < j; k++) skip.add(k);
-    i = j === i ? i + 1 : j;
-  }
+  // 予約表（紙）をそのままコピーした文字か。
+  //   - 印刷された言葉（「この週の火曜日」「取り込み日」など）が 2 つ以上ある
+  //   - または、時刻だけの行（印刷された時刻の目盛り）が 3 行以上ある
+  const normalized = text.split(/\r?\n/).map((l) => normalizeText(l).trim());
+  const markerCount = SHEET_MARKERS.filter((re) => normalized.some((l) => re.test(l))).length;
+  const sheetMode = markerCount >= 2 || infos.filter((i) => i.bareTime).length >= 3;
 
   const recs: Rec[] = [];
   let cur: Rec | null = null;
@@ -597,11 +616,29 @@ export function parsePastedText(text: string, opts: ParseOptions): ParseResult {
     if (cur) recs.push(cur);
     cur = null;
   };
+  const ignore = (info: LineInfo) => {
+    if (!ignoredLines.includes(info.raw.trim())) ignoredLines.push(info.raw.trim());
+  };
 
-  infos.forEach((info, idx) => {
-    if (skip.has(idx) || info.prose) {
-      if (!ignoredLines.includes(info.raw.trim())) ignoredLines.push(info.raw.trim());
+  infos.forEach((info) => {
+    // 時刻だけの行は、印刷された時刻の目盛りとみなして使わない（予約の時刻にしない）。
+    // 人が書いた時刻は「10:00 山田 C2」のように同じ行にあるか、「12:15〜13:00」「時間：10:00」の形。
+    if (info.prose || info.bareTime) {
+      ignore(info);
       return;
+    }
+    if (sheetMode) {
+      // 予約表の文字では、日付（列の見出し）と時刻（目盛り）は予約の日時ではない。
+      // 範囲で書かれた時間（9:30〜10:15）と見出しつきの時間だけ、人が書いたものとして残す。
+      if (info.header) {
+        ignore(info);
+        return;
+      }
+      info.date = null;
+      if (info.timeKind === "single") {
+        info.start = "";
+        info.timeKind = "none";
+      }
     }
     if (info.date && info.date !== curDate) {
       flush();
@@ -643,10 +680,15 @@ export function parsePastedText(text: string, opts: ParseOptions): ParseResult {
   const rows: ParsedRow[] = [];
   recs.forEach((rec, i) => {
     fuzzyMenuFromNames(rec, opts.catalog);
-    // 時刻もメニューも無い（お名前だけ）ものは、予約ではなく「読み取れなかった行」に回す
+    // 時刻もメニューも無い（お名前だけ）ものは、予約ではなく「読み取れなかった行」に回す。
+    // ただし予約表の文字では時刻は元から無く、コースの記号も読み違えやすいので、
+    // 2 文字以上のお名前は候補として残す（時刻とメニューは確認画面で選んでもらう）。
     if (!rec.start && rec.hits.length === 0 && rec.unknown.length === 0) {
-      unreadLines.push(...rec.lines);
-      return;
+      const nameOnlyRow = sheetMode && nameKey(rec.names.join("")).length >= 2;
+      if (!nameOnlyRow) {
+        unreadLines.push(...rec.lines);
+        return;
+      }
     }
     // 同じメニューが 2 回読めたら 1 つにする
     const seen = new Set<string>();
@@ -662,8 +704,9 @@ export function parsePastedText(text: string, opts: ParseOptions): ParseResult {
       unknownCodes: [...new Set(rec.unknown)],
       notes: rec.notes.join(" / "),
       sourceLines: rec.lines,
+      dateUnsure: sheetMode,
     });
   });
 
-  return { rows, unreadLines, ignoredLines };
+  return { rows, unreadLines, ignoredLines, sheetMode };
 }

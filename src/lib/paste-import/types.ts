@@ -72,6 +72,8 @@ export type ParsedRow = {
   notes: string;
   /** もとの文字（この候補を作った行） */
   sourceLines: string[];
+  /** 日付が文字からは決められなかった（予約表をそのままコピーした文字。どの曜日の列か分からない） */
+  dateUnsure: boolean;
 };
 
 export type ParseResult = {
@@ -80,6 +82,11 @@ export type ParseResult = {
   unreadLines: string[];
   /** 予約ではないと判断して読み飛ばした行（説明の文章・印刷された時刻など） */
   ignoredLines: string[];
+  /**
+   * 予約表（紙）をそのままコピーした文字だった。
+   * この場合、文字の中の日付（列の見出し）と時刻（印刷された目盛り）は予約の日時に使っていない。
+   */
+  sheetMode: boolean;
 };
 
 export type ParseOptions = {
@@ -116,6 +123,11 @@ export type DraftRow = {
    * オーナー様がメニューを選び直したら消える。
    */
   menuNotice: string;
+  /**
+   * 日付についての注意（予約表の文字からは、どの曜日の予約か分からない）。
+   * オーナー様が日付を選び直したら消える。
+   */
+  dateNotice: string;
   /** 読めなかった記号 */
   unknownCodes: string[];
   sourceText: string;

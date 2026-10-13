@@ -114,6 +114,8 @@ export function ImportFlow({ today }: { today: string }) {
   const [view, setView] = React.useState<View>({ rows: [], judged: [] });
   const [unreadLines, setUnreadLines] = React.useState<string[]>([]);
   const [ignoredLines, setIgnoredLines] = React.useState<string[]>([]);
+  // 予約表をそのままコピーした文字だった（日付・時刻は文字から決めていない）
+  const [sheetMode, setSheetMode] = React.useState(false);
   const [notice, setNotice] = React.useState<Notice | null>(null);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [done, setDone] = React.useState<{ count: number; skipped: number } | null>(null);
@@ -160,6 +162,7 @@ export function ImportFlow({ today }: { today: string }) {
       setView(judge(res.rows, d));
       setUnreadLines(res.unreadLines);
       setIgnoredLines(res.ignoredLines);
+      setSheetMode(res.sheetMode);
       setPhase("review");
       window.scrollTo({ top: 0 });
       if (res.rows.length === 0) {
@@ -191,6 +194,12 @@ export function ImportFlow({ today }: { today: string }) {
     );
   }
 
+  /** 全部の行の日付をまとめて変える（予約表 1 日分をまとめて貼り付けたとき用） */
+  function setAllDates(date: string) {
+    if (!date) return;
+    setView((v) => judge(v.rows.map((r) => ({ ...r, date, dateNotice: "" })), data));
+  }
+
   function toggleChecked(key: string, checked: boolean) {
     setView((v) => ({ ...v, rows: v.rows.map((r) => (r.key === key ? { ...r, checked } : r)) }));
   }
@@ -213,6 +222,7 @@ export function ImportFlow({ today }: { today: string }) {
     setView({ rows: [], judged: [] });
     setUnreadLines([]);
     setIgnoredLines([]);
+    setSheetMode(false);
     setDone(null);
   }
 
@@ -376,6 +386,29 @@ export function ImportFlow({ today }: { today: string }) {
       <p className="rounded-xl border-2 border-amber-400 bg-amber-50 p-4 text-base font-bold leading-relaxed text-amber-900" role="status">
         まだ登録されていません。中身を確かめてから、いちばん下の「登録する」を押してください。
       </p>
+
+      {/* 予約表をそのままコピーした文字: 位置で表している「曜日」と「時刻」は文字に残らない */}
+      {sheetMode && (
+        <section className="space-y-3 rounded-xl border-2 border-sky-400 bg-sky-50 p-4 text-sky-950">
+          <p className="text-base font-bold">予約表をそのままコピーした文字のようです</p>
+          <p className="text-base leading-relaxed">
+            この文字からは、<strong>何曜日の予約か</strong>と<strong>何時からか</strong>が分かりません
+            （紙では枠の位置で表しているためです）。紙を見ながら、1 件ずつ<strong>日付と時刻</strong>を選んでください。
+          </p>
+          <div className="space-y-1">
+            <label htmlFor="all-dates" className="block text-sm font-bold">
+              全部の行を同じ日付にする
+            </label>
+            <input
+              id="all-dates"
+              type="date"
+              defaultValue=""
+              onChange={(e) => setAllDates(e.target.value)}
+              className={cn(fieldClass, "max-w-xs")}
+            />
+          </div>
+        </section>
+      )}
 
       <section className="space-y-3 rounded-xl border border-zinc-200 bg-white p-4">
         <p className="text-lg font-bold">読み取った予約：{view.rows.length} 件</p>
@@ -584,7 +617,8 @@ function RowCard({
             id={id("date")}
             type="date"
             value={row.date}
-            onChange={(e) => onEdit(row.key, { date: e.target.value })}
+            // 自分で日付を選んだら、「何曜日か分かりません」の注意は消す
+            onChange={(e) => onEdit(row.key, { date: e.target.value, dateNotice: "" })}
             className={fieldClass}
           />
         </div>

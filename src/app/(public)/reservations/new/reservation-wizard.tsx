@@ -650,6 +650,8 @@ function MenuStep({
   // 非オプションのメニューを 1 つ選んでいるか（カット/コース等）
   const hasMainMenu = selectedMenus.some((m) => !m.is_option);
   const hasOption = selectedMenus.some((m) => m.is_option);
+  // 案内文に出すオプションの例（ネット予約に出しているオプションから。固定の名前を書かない）
+  const optionExamples = grouped.option.slice(0, 3).map((m) => m.name).join("・");
 
   /**
    * メニューカードのクリック。
@@ -903,7 +905,7 @@ function MenuStep({
                   ▶ オプションが不要な場合は、このまま日時選択へお進みください。
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  頭皮スパ・フェイススパ・鼻脱毛などの追加は「オプション」タブから選べます。
+                  {optionExamples ? `${optionExamples}などの追加は` : "追加のメニューは"}「オプション」タブから選べます。
                 </p>
               </div>
             )}
@@ -924,7 +926,8 @@ function MenuStep({
                 .join("、") || "メニュー"}
               をお選びいただきました。
               <br />
-              お顔剃り・頭皮スパなどの<strong>オプション</strong>を追加できます。
+              {optionExamples ? `${optionExamples}などの` : ""}
+              <strong>オプション</strong>を追加できます。
               不要な場合はこのまま日時選択へお進みください。
             </DialogDescription>
           </DialogHeader>

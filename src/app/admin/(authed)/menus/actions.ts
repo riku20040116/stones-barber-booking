@@ -36,6 +36,7 @@ const menuSchema = z.object({
   image_url: z.string().max(500).nullable(),
   sort_order: z.coerce.number().int().min(0).max(9999),
   is_active: z.coerce.boolean(),
+  show_on_web: z.coerce.boolean(),
 });
 
 export type SaveMenuResult = { ok: true } | { ok: false; error: string };
@@ -61,6 +62,7 @@ function parseFormData(fd: FormData) {
     image_url: nullIfBlank(fd.get("image_url")),
     sort_order: fd.get("sort_order") ?? 0,
     is_active: fd.get("is_active") === "on",
+    show_on_web: fd.get("show_on_web") === "on",
   });
 }
 

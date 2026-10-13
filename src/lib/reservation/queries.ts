@@ -106,7 +106,7 @@ function logSupabaseError(
   console.error(`${label}:`, formatted);
 }
 
-/** 公開メニュー一覧（is_active=true）。Server Component から呼ぶ。 */
+/** ネット予約に出すメニュー一覧（is_active=true かつ show_on_web が false でないもの）。Server Component から呼ぶ。 */
 export async function fetchActiveMenus(): Promise<MenuRow[]> {
   if (!isSupabaseConfigured()) {
     console.warn("[queries] Supabase 未設定のため fetchActiveMenus を空で返します");
@@ -123,7 +123,9 @@ export async function fetchActiveMenus(): Promise<MenuRow[]> {
       logSupabaseError("fetchActiveMenus error", error);
       return [];
     }
-    return data ?? [];
+    // ネット予約に出さないメニュー（show_on_web=false）を外す。
+    // 列がまだ無い環境でもメニューが消えないよう、DB の条件ではなくここで絞る。
+    return (data ?? []).filter((m) => m.show_on_web !== false);
   } catch (e) {
     logSupabaseError("fetchActiveMenus exception", e);
     return [];

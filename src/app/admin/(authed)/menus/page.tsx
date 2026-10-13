@@ -71,6 +71,11 @@ export default async function AdminMenusPage() {
                             オプション
                           </span>
                         )}
+                        {m.show_on_web === false && (
+                          <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-normal text-amber-800">
+                            ネット予約には出さない
+                          </span>
+                        )}
                       </p>
                       <p className="truncate text-xs text-zinc-500">
                         {m.slug} · {formatMenuPrice(m)} ·{" "}

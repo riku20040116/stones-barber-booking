@@ -91,6 +91,7 @@ export function judgeRows(rows: DraftRow[], ctx: JudgeContext): Judged[] {
     }
 
     // ここから要確認
+    if (row.dateNotice) checks.push(row.dateNotice);
     if (row.menuNotice) checks.push(row.menuNotice);
     if (row.unknownCodes.length > 0) {
       checks.push(`読めない記号がありました（${row.unknownCodes.join("・")}）`);

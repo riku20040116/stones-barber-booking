@@ -154,6 +154,26 @@ test("読めない記号 → 要確認（メニューが無ければエラー）
   assert.equal(withMenu!.status, "check");
 });
 
+test("予約表そのままの文字から作った行: 時刻を選ぶまでエラー、選んでも日付を確かめるまで要確認", () => {
+  // 時刻だけの行が 3 行以上 → 予約表の文字とみなす
+  const [row] = drafts("9:00\n9:30\n10:00\nヒグマ C2", "2026-10-21");
+  assert.equal(row!.start, "");
+  const [noTime] = judgeRows([row!], ctx());
+  assert.equal(noTime!.status, "error");
+  assert.ok(noTime!.reasons.includes("時刻がありません"));
+
+  // 時刻を選ぶ → まだ「何曜日か分かりません」の要確認（最初はチェックが付かない）
+  const withTime = syncEnd({ ...row!, start: "09:30" }, TEST_MENUS);
+  const [check] = judgeRows([withTime], ctx());
+  assert.equal(check!.status, "check");
+  assert.deepEqual(check!.reasons, ["この文字からは、何曜日の予約か分かりません。日付が合っているか確かめてください"]);
+  assert.equal(withJudgement([withTime], [check!])[0]!.checked, false);
+
+  // 日付を自分で選んだら注意は消えて OK
+  const [ok] = judgeRows([{ ...withTime, dateNotice: "" }], ctx());
+  assert.equal(ok!.status, "ok");
+});
+
 test("終了時刻が開始より前 → エラー", () => {
   const [row] = drafts("10:00 山田 C2");
   const [j] = judgeRows([{ ...row!, end: "09:45", endSource: "manual" }], ctx());
