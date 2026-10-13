@@ -372,6 +372,11 @@ export function ImportFlow({ today }: { today: string }) {
 
   return (
     <div className="space-y-5 pb-28">
+      {/* 「読み込む」で終わったと思われやすいので、まだ登録されていないことを先に伝える */}
+      <p className="rounded-xl border-2 border-amber-400 bg-amber-50 p-4 text-base font-bold leading-relaxed text-amber-900" role="status">
+        まだ登録されていません。中身を確かめてから、いちばん下の「登録する」を押してください。
+      </p>
+
       <section className="space-y-3 rounded-xl border border-zinc-200 bg-white p-4">
         <p className="text-lg font-bold">読み取った予約：{view.rows.length} 件</p>
         {perDay.length > 0 && (
